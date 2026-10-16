@@ -42,7 +42,7 @@ import java.util.stream.Stream;
 public final class VisitedChunks {
 	private static final String EXPORTS_HEADER = "# AOMC Visited: exports not yet marked as uploaded."
 			+ " 'next <n>' is the next export's number; then one export per line: its number, its record, and the"
-			+ " chunks (x,z) it contained that haven't been mapped again since";
+			+ " chunks (x,z) it contained whose map hasn't changed since";
 	/** Exports never marked as uploaded are forgotten after this many newer ones. */
 	private static final int MAX_EXPORTS = 20;
 	private static final String HEADER = "# AOMC Visited: chunks Xaero's World Map wrote, as chunk x,z"
@@ -63,9 +63,14 @@ public final class VisitedChunks {
 	private final Map<String, Long2IntOpenHashMap> regionVersions = new HashMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
-	/** Counts Xaero's writes this session, so we can tell what was written after an export. */
+	/**
+	 * Counts Xaero's writes this session that changed the map, so we can tell what changed after an export.
+	 * Writes that leave a chunk's map as it was don't count: Xaero rewrites the chunks around the player
+	 * every so often even when nothing changed (an export of 289 chunks around a player standing still was
+	 * marked as uploaded and forgot 0 of them, October 2026).
+	 */
 	private long writes;
-	/** Record key to each chunk's latest write this session ({@link #writes} at the time). */
+	/** Record key to each chunk's latest write this session that changed it ({@link #writes} at the time). */
 	private final Map<String, Long2LongOpenHashMap> lastWrite = new HashMap<>();
 	/** Exports that can still be marked as uploaded, by number. */
 	private final Map<Integer, Export> exports = new HashMap<>();
@@ -116,7 +121,9 @@ public final class VisitedChunks {
 		String key = recordKey(dimension, layer);
 		long pos = ChunkPos.pack(x, z);
 		long region = ChunkPos.pack(x >> 5, z >> 5);
-		lastWrite.computeIfAbsent(key, k -> new Long2LongOpenHashMap()).put(pos, ++writes);
+		if (differs) {
+			lastWrite.computeIfAbsent(key, k -> new Long2LongOpenHashMap()).put(pos, ++writes);
+		}
 		boolean added = records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(pos);
 		// Once changed, a chunk stays changed: later writes compare against this session's own data.
 		boolean nowChanged = differs && changed.computeIfAbsent(key, k -> new LongOpenHashSet()).add(pos);
@@ -321,14 +328,14 @@ public final class VisitedChunks {
 		return forgotten;
 	}
 
-	/** How many writes Xaero has made this session; pass to {@link #rememberExport}. */
+	/** How many writes that changed the map Xaero has made this session; pass to {@link #rememberExport}. */
 	public synchronized long writes() {
 		return writes;
 	}
 
 	/**
 	 * Remembers what an export contained, so it can be marked as uploaded later (also after a restart);
-	 * chunks written after {@code writesAtStart} are newer than the export and won't be forgotten. Returns its
+	 * chunks whose map changed after {@code writesAtStart} are newer than the export and won't be forgotten. Returns its
 	 * number for {@link #markUploaded}.
 	 */
 	public synchronized int rememberExport(String key, LongOpenHashSet chunks, long writesAtStart) {
@@ -345,7 +352,7 @@ public final class VisitedChunks {
 	}
 
 	/**
-	 * Forgets the chunks an export contained, except those Xaero has written again since (they hold newer
+	 * Forgets the chunks an export contained, except those whose map Xaero has changed since (they hold newer
 	 * data than what was uploaded). Returns how many were forgotten, or -1 if there's no such export
 	 * (unknown number, already marked, or the record was cleared since).
 	 */
@@ -433,7 +440,7 @@ public final class VisitedChunks {
 
 	/**
 	 * Saves the exports not yet marked as uploaded. Write counts restart with the game, so instead of the
-	 * count each export is saved without the chunks mapped again since it was made; after loading, any
+	 * count each export is saved without the chunks whose map changed since it was made; after loading, any
 	 * write counts as newer (see {@link #loadExports}).
 	 */
 	private void saveExports() {

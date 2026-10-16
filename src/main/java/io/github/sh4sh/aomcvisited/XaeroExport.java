@@ -145,7 +145,7 @@ public final class XaeroExport {
 		private final Runnable whenDone;
 		/** What Xaero's map was showing before; restored at the end. */
 		private final ResourceKey<Level> previousCustom;
-		/** Xaero's write count at the start: chunks written later are kept by "mark as uploaded". */
+		/** Xaero's write count at the start: chunks whose map changes later are kept by "mark as uploaded". */
 		private final long writesAtStart = AomcVisitedClient.VISITED.writes();
 		private final MutableComponent report = Component.empty();
 		private final List<Component> buttons = new ArrayList<>();

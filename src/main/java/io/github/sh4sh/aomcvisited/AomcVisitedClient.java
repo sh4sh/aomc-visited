@@ -248,7 +248,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 			VisitedHighlighter.refreshAll();
 		}
 		source.sendFeedback(Chat.success("Marked as uploaded: forgot " + forgotten + " chunks.")
-				.append(Chat.line("Anything mapped since that export is kept for the next one.")));
+				.append(Chat.line("Anything that changed since that export is kept for the next one.")));
 		return 1;
 	}
 
