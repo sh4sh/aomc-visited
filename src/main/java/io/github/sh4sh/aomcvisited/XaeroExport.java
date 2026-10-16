@@ -4,7 +4,9 @@ import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.world.level.ChunkPos;
 import xaero.map.MapProcessor;
 import xaero.map.WorldMapSession;
@@ -88,7 +90,7 @@ final class XaeroExport {
 					LongOpenHashSet exported = AomcVisitedClient.VISITED.snapshot(key);
 					int changedCount = AomcVisitedClient.VISITED.changedCount(key);
 					AomcVisitedClient.VISITED.save();
-					Component message = clean(result.getFolderToOpen(), area, exported, changedCount);
+					Component message = clean(result.getFolderToOpen(), area, key, exported, changedCount);
 					AomcVisitedClient.LOGGER.info(message.getString());
 					if (client.player != null) {
 						client.player.sendSystemMessage(message);
@@ -110,7 +112,7 @@ final class XaeroExport {
 	 * {@code map exports} itself). With the option off and a bigger area, the single image is scaled down and
 	 * can't be cleaned chunk by chunk.
 	 */
-	private static Component clean(Path folder, Area area, LongOpenHashSet chunks, int changedCount) {
+	private static Component clean(Path folder, Area area, String key, LongOpenHashSet chunks, int changedCount) {
 		TileMasker.Visited visited = (x, z) -> chunks.contains(ChunkPos.pack(x, z));
 		Path written = folder;
 		TileMasker.Result result;
@@ -140,11 +142,21 @@ final class XaeroExport {
 			return Component.literal("Found no exported images in " + folder + ", so nothing was cleaned. Don't"
 					+ " upload anything from this export.").withStyle(ChatFormatting.RED);
 		}
-		return Component.literal("Export cleaned and ready to upload: " + written + "\nKept " + result.chunksKept()
-				+ " chunks you visited (" + changedCount + " new or changed), blacked out "
+		Component message = Component.literal("Export cleaned and ready to upload: " + written + "\nKept "
+				+ result.chunksKept() + " chunks you visited (" + changedCount + " new or changed), blacked out "
 				+ result.chunksBlackedOut() + " chunks of older map, " + (result.tiles() - result.tilesDeleted())
-				+ " of " + result.tiles() + " images left.")
-				.withStyle(ChatFormatting.GREEN);
+				+ " of " + result.tiles() + " images left. ").withStyle(ChatFormatting.GREEN);
+		if (result.tiles() == result.tilesDeleted()) {
+			return message;
+		}
+		int number = AomcVisitedClient.VISITED.rememberExport(key, chunks);
+		Component button = Component.literal("[Mark as uploaded]").withStyle(style -> style
+				.withColor(ChatFormatting.AQUA)
+				.withUnderlined(true)
+				.withClickEvent(new ClickEvent.RunCommand("/visited uploaded " + number))
+				.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click once the upload has gone through:"
+						+ " forgets what this export contained, so the next one only has ground mapped since."))));
+		return message.copy().append(button);
 	}
 
 	/** The newest single-image export in {@code folder} whose name ends in this area's top-left corner. */

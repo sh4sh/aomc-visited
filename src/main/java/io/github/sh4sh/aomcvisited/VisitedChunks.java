@@ -1,6 +1,7 @@
 package io.github.sh4sh.aomcvisited;
 
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
@@ -55,6 +56,18 @@ public final class VisitedChunks {
 	private final Map<String, Long2IntOpenHashMap> regionVersions = new HashMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
+	/** Counts Xaero's writes this session, so we can tell what was written after an export. */
+	private long writes;
+	/** Record key to each chunk's latest write this session ({@link #writes} at the time). */
+	private final Map<String, Long2LongOpenHashMap> lastWrite = new HashMap<>();
+	/** Exports made this session that can still be marked as uploaded, by number. */
+	private final Map<Integer, Export> exports = new HashMap<>();
+	private int nextExport = 1;
+
+	/** What an export contained: a record's chunks, and {@link #writes} when it was made. */
+	private record Export(String key, LongOpenHashSet chunks, long writes) {
+	}
+
 	public VisitedChunks(Path root) {
 		this.root = root;
 	}
@@ -80,6 +93,7 @@ public final class VisitedChunks {
 		String key = recordKey(dimension, layer);
 		long pos = ChunkPos.pack(x, z);
 		long region = ChunkPos.pack(x >> 5, z >> 5);
+		lastWrite.computeIfAbsent(key, k -> new Long2LongOpenHashMap()).put(pos, ++writes);
 		boolean added = records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(pos);
 		// Once changed, a chunk stays changed: later writes compare against this session's own data.
 		boolean nowChanged = differs && changed.computeIfAbsent(key, k -> new LongOpenHashSet()).add(pos);
@@ -166,6 +180,8 @@ public final class VisitedChunks {
 		changed.clear();
 		regionCounts.clear();
 		regionVersions.clear();
+		lastWrite.clear();
+		exports.clear();
 		dirty.clear();
 	}
 
@@ -202,6 +218,7 @@ public final class VisitedChunks {
 			}
 			forgotten += records.remove(key).size();
 			changed.remove(key);
+			lastWrite.remove(key);
 			dirty.remove(key);
 			// Bump rather than reset the region versions, so the map highlight's hash for every affected
 			// region differs from anything Xaero has cached and it redraws them.
@@ -218,6 +235,54 @@ public final class VisitedChunks {
 				}
 			}
 		}
+		return forgotten;
+	}
+
+	/**
+	 * Remembers what an export contained, so it can be marked as uploaded later this session. Returns its
+	 * number for {@link #markUploaded}.
+	 */
+	public synchronized int rememberExport(String key, LongOpenHashSet chunks) {
+		int number = nextExport++;
+		exports.put(number, new Export(key, chunks, writes));
+		return number;
+	}
+
+	/**
+	 * Forgets the chunks an export contained, except those Xaero has written again since (they hold newer
+	 * data than what was uploaded). Returns how many were forgotten, or -1 if there's no such export this
+	 * session (unknown number, already marked, or the game was restarted).
+	 */
+	public synchronized int markUploaded(int number) {
+		Export export = exports.remove(number);
+		if (export == null || server == null) {
+			return -1;
+		}
+		LongOpenHashSet chunks = records.get(export.key());
+		if (chunks == null) {
+			return 0;
+		}
+		LongOpenHashSet changedChunks = changed.get(export.key());
+		Long2LongOpenHashMap written = lastWrite.getOrDefault(export.key(), new Long2LongOpenHashMap());
+		Long2IntOpenHashMap counts = regionCounts.computeIfAbsent(export.key(), k -> new Long2IntOpenHashMap());
+		Long2IntOpenHashMap versions = regionVersions.computeIfAbsent(export.key(), k -> new Long2IntOpenHashMap());
+		int forgotten = 0;
+		for (LongIterator it = export.chunks().iterator(); it.hasNext(); ) {
+			long pos = it.nextLong();
+			if (written.get(pos) > export.writes() || !chunks.remove(pos)) {
+				continue;
+			}
+			if (changedChunks != null) {
+				changedChunks.remove(pos);
+			}
+			written.remove(pos);
+			long region = ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5);
+			counts.addTo(region, -1);
+			versions.addTo(region, 1);
+			forgotten++;
+		}
+		dirty.add(export.key());
+		save();
 		return forgotten;
 	}
 

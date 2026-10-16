@@ -1,5 +1,6 @@
 package io.github.sh4sh.aomcvisited;
 
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
@@ -49,6 +50,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 						.then(ClientCommands.literal("clear")
 								.executes(context -> clear(context.getSource(), false))
 								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true))))
+						.then(ClientCommands.literal("uploaded")
+								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
+										markUploaded(context.getSource(), IntegerArgumentType.getInteger(context, "export")))))
 						.then(ClientCommands.literal("show")
 								.then(ClientCommands.literal("on").executes(context -> setShow(context.getSource(), true)))
 								.then(ClientCommands.literal("off").executes(context -> setShow(context.getSource(), false))))));
@@ -117,6 +121,22 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		source.sendFeedback(Component.literal("Forgot " + forgotten + " chunks recorded in " + id + ". Zoomed-out"
 				+ " world map views may show the old tint until you zoom in on them once."));
+		return 1;
+	}
+
+	/** {@code /visited uploaded <export>}: run by the [Mark as uploaded] button on an export message. */
+	private static int markUploaded(FabricClientCommandSource source, int export) {
+		int forgotten = VISITED.markUploaded(export);
+		if (forgotten < 0) {
+			source.sendError(Component.literal("That export was already marked as uploaded, or is from before the"
+					+ " game was restarted. To start over, use /visited clear."));
+			return 0;
+		}
+		if (xaeroInstalled()) {
+			VisitedHighlighter.refreshAll();
+		}
+		source.sendFeedback(Component.literal("Marked as uploaded: forgot " + forgotten + " chunks. Anything"
+				+ " mapped since that export is kept for the next one."));
 		return 1;
 	}
 
