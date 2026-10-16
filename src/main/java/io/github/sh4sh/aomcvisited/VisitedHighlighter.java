@@ -14,9 +14,9 @@ import xaero.map.world.MapDimension;
 import java.util.List;
 
 /**
- * Tints the chunks the next export will keep on Xaero's World Map (and its minimap): bright where the
- * ground is new or changed, faint where it's unchanged since the player's map last had it, with a bright
- * edge where the record ends. Registered by {@code XaeroWorldMapSessionMixin}; only load this class when
+ * Shows the next export on Xaero's World Map (and its minimap): new or changed ground is filled green,
+ * and a green outline runs around everything the export keeps, including unchanged ground (which is
+ * exported too, but has no fill). Two shades of fill were tried first and were hard to tell apart. Registered by {@code XaeroWorldMapSessionMixin}; only load this class when
  * {@code xaeroworldmap} is installed.
  *
  * <p>Xaero caches highlights per 512-block region by {@link #calculateRegionHash}, so whenever what we'd
@@ -25,7 +25,7 @@ import java.util.List;
 public final class VisitedHighlighter extends ChunkHighlighter {
 	/** Colours are 0xRRGGBBAA, as in Xaero's claims highlighter. */
 	private static final int CHANGED = 0x40FF4060;
-	private static final int UNCHANGED = 0x40FF4020;
+	private static final int UNCHANGED = 0x00000000;
 	private static final int EDGE = 0x40FF40C0;
 	private static final Component CHANGED_TOOLTIP = Component.literal("New or changed: will be exported");
 	private static final Component UNCHANGED_TOOLTIP = Component.literal("Unchanged since you last mapped it: will be exported");
