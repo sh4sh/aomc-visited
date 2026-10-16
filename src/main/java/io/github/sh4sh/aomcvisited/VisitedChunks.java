@@ -71,6 +71,12 @@ public final class VisitedChunks {
 	private final Map<Integer, Export> exports = new HashMap<>();
 	private int nextExport = 1;
 	private boolean exportsDirty;
+	/** The normal-map records found on disk when the server was opened: ground mapped in earlier sessions. */
+	private List<Earlier> earlier = List.of();
+
+	/** A record from an earlier session: its key, chunk count, and when it was last saved. */
+	public record Earlier(String key, int chunks, long savedMillis) {
+	}
 
 	/** What an export contained: a record's chunks, and {@link #writes} when it was made. */
 	private record Export(String key, LongOpenHashSet chunks, long writes) {
@@ -156,6 +162,7 @@ public final class VisitedChunks {
 			return;
 		}
 		loadExports(dir.resolve("exports.txt"));
+		List<Earlier> found = new java.util.ArrayList<>();
 		try (Stream<Path> files = Files.walk(dir)) {
 			for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".txt"))::iterator) {
 				Path rel = dir.relativize(file);
@@ -166,6 +173,9 @@ public final class VisitedChunks {
 				String key = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
+				if (!key.contains("/") && !chunks.isEmpty()) {
+					found.add(new Earlier(key, chunks.size(), Files.getLastModifiedTime(file).toMillis()));
+				}
 				records.put(key, chunks);
 				changed.put(key, changedChunks);
 				Long2IntOpenHashMap counts = new Long2IntOpenHashMap();
@@ -179,6 +189,16 @@ public final class VisitedChunks {
 		} catch (IOException e) {
 			AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", dir, e);
 		}
+		found.sort(java.util.Comparator.comparing(Earlier::key));
+		earlier = List.copyOf(found);
+	}
+
+	/**
+	 * The ground mapped in earlier sessions that was still recorded when joining (not marked as uploaded or
+	 * cleared), for the reminder on joining. Empty once it's all been cleared.
+	 */
+	public synchronized List<Earlier> earlier() {
+		return earlier.stream().filter(record -> records.containsKey(record.key())).toList();
 	}
 
 	/** Saves and forgets the current server's record. */
@@ -193,6 +213,7 @@ public final class VisitedChunks {
 		exports.clear();
 		nextExport = 1;
 		exportsDirty = false;
+		earlier = List.of();
 		dirty.clear();
 	}
 
@@ -224,7 +245,21 @@ public final class VisitedChunks {
 	 * many chunks were forgotten.
 	 */
 	public synchronized int clear(ResourceKey<Level> dimension) {
-		String id = dimension.identifier().toString();
+		return clear(dimension.identifier().toString());
+	}
+
+	/** Forgets every record on this server: all dimensions and layers. Returns how many chunks were forgotten. */
+	public synchronized int clearAll() {
+		Set<String> dimensions = new HashSet<>();
+		records.keySet().forEach(key -> dimensions.add(key.split("/", 2)[0]));
+		int forgotten = 0;
+		for (String id : dimensions) {
+			forgotten += clear(id);
+		}
+		return forgotten;
+	}
+
+	private int clear(String id) {
 		int forgotten = 0;
 		if (exports.values().removeIf(export -> export.key().equals(id) || export.key().startsWith(id + "/"))) {
 			exportsDirty = true;

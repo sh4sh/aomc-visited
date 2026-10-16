@@ -37,10 +37,20 @@ public class AomcVisitedClient implements ClientModInitializer {
 	private int ticksSinceSave;
 	/** The export starts a tick after the command, once the chat screen has closed. */
 	private boolean exportNextTick;
+	/** Ticks until the reminder about earlier ground, after joining; 0 when there's none to show. */
+	private int reminderTicks;
+
+	/** Wait a few seconds after joining, so the reminder isn't lost among the server's join messages. */
+	private static final int REMINDER_DELAY_TICKS = 5 * 20;
+	/** Earlier ground older than this gets a stronger warning. */
+	private static final long STALE_MS = 24 * 60 * 60 * 1000L;
 
 	@Override
 	public void onInitializeClient() {
-		ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> VISITED.open(VisitedChunks.serverKey(client)));
+		ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
+			VISITED.open(VisitedChunks.serverKey(client));
+			reminderTicks = REMINDER_DELAY_TICKS;
+		});
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
 			VISITED.close();
 			if (xaeroInstalled()) {
@@ -58,7 +68,10 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource()))))
 						.then(ClientCommands.literal("clear")
 								.executes(context -> clear(context.getSource(), false))
-								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true))))
+								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true)))
+								.then(ClientCommands.literal("all")
+										.executes(context -> clearAll(context.getSource(), false))
+										.then(ClientCommands.literal("confirm").executes(context -> clearAll(context.getSource(), true)))))
 						.then(ClientCommands.literal("uploaded")
 								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
@@ -84,6 +97,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 			if (error != null && client.player != null) {
 				client.player.sendSystemMessage(error);
 			}
+		}
+		if (reminderTicks > 0 && --reminderTicks == 0) {
+			remindOfEarlierGround(client);
 		}
 		if (++ticksSinceSave >= AUTOSAVE_TICKS) {
 			ticksSinceSave = 0;
@@ -132,6 +148,72 @@ public class AomcVisitedClient implements ClientModInitializer {
 			VisitedHighlighter.refreshAll();
 		}
 		source.sendFeedback(Chat.success("Forgot " + forgotten + " chunks recorded in " + id + ".")
+				.append(Chat.line("Zoomed-out world map views may show the old tint until you zoom in on them once.")));
+		return 1;
+	}
+
+	/**
+	 * Shortly after joining: if ground mapped in an earlier session is still recorded (the game crashed, or
+	 * the player left before uploading), say so, with how old it is. The webmap can't tell old map from new,
+	 * so the longer it waits the likelier it is to overwrite newer map someone else uploaded: nudge the
+	 * player to export it now, or start over.
+	 */
+	private static void remindOfEarlierGround(Minecraft client) {
+		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
+		if (earlier.isEmpty() || client.player == null) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		boolean stale = earlier.stream().anyMatch(record -> now - record.savedMillis() > STALE_MS);
+		String text = "You have map data from an earlier session that isn't uploaded yet:";
+		MutableComponent message = stale ? Chat.warning(text) : Chat.info(text);
+		for (VisitedChunks.Earlier record : earlier) {
+			String name = record.key().startsWith("minecraft:") ? record.key().substring("minecraft:".length()) : record.key();
+			message.append(Chat.line(name + ": " + record.chunks() + " chunks, last mapped " + ago(now - record.savedMillis())));
+		}
+		message.append(Chat.line(stale
+				? "Some of it is more than a day old. If others have mapped there since, uploading it would"
+						+ " overwrite their newer map. If in doubt, start over."
+				: "Export and upload it soon: the webmap can't tell old map from new."));
+		Chat.send(client, message.append(Chat.buttons(
+				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
+						"Export it now, with anything you map from here on"),
+				Chat.button("Start over", ChatFormatting.RED, "/visited clear all",
+						"Forget it in every dimension (asks to confirm)"))));
+	}
+
+	private static String ago(long ms) {
+		long minutes = Math.max(1, ms / 60_000);
+		if (minutes < 60) {
+			return minutes == 1 ? "a minute ago" : minutes + " minutes ago";
+		}
+		long hours = minutes / 60;
+		if (hours < 24) {
+			return hours == 1 ? "an hour ago" : hours + " hours ago";
+		}
+		long days = hours / 24;
+		return days == 1 ? "a day ago" : days + " days ago";
+	}
+
+	/** {@code /visited clear all [confirm]}: like {@link #clear}, for every dimension on this server. */
+	private static int clearAll(FabricClientCommandSource source, boolean confirm) {
+		if (VISITED.server() == null) {
+			source.sendFeedback(Chat.error("Not connected to a world."));
+			return 0;
+		}
+		if (!confirm) {
+			int total = VISITED.counts().values().stream().mapToInt(Integer::intValue).sum();
+			source.sendFeedback(Chat.warning("This will forget all " + total + " chunks recorded on this server,"
+					+ " in every dimension, so the next export starts from scratch.")
+					.append(Chat.buttons(Chat.button("Confirm", ChatFormatting.RED, "/visited clear all confirm",
+							"Forget the record in every dimension"))));
+			return 1;
+		}
+		int forgotten = VISITED.clearAll();
+		if (xaeroInstalled()) {
+			VisitedHighlighter.refreshAll();
+		}
+		source.sendFeedback(Chat.success("Forgot " + forgotten + " chunks in every dimension.")
 				.append(Chat.line("Zoomed-out world map views may show the old tint until you zoom in on them once.")));
 		return 1;
 	}
