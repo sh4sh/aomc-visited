@@ -43,8 +43,6 @@ final class XaeroExport {
 		}
 		String key = VisitedChunks.recordKey(shown.getDimId(), processor.getCurrentCaveLayer());
 		LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
-		// So the record on disk matches this export (handy when checking an export by hand).
-		AomcVisitedClient.VISITED.save();
 		if (chunks.isEmpty()) {
 			return Component.literal("Nothing recorded for " + key + " yet. If Xaero has been mapping and this"
 					+ " stays empty, this version of Xaero's World Map may not be supported.");
@@ -68,7 +66,12 @@ final class XaeroExport {
 				// Runs on the main thread before Xaero opens the folder, so the player only ever sees the
 				// cleaned export. The game is already frozen for the export; this adds about a second.
 				if (result.getType().isSuccess() && result.getFolderToOpen() != null) {
-					Component message = clean(result.getFolderToOpen(), chunks);
+					// Take the record now, not when the command ran: Xaero keeps mapping meanwhile (it was
+					// still catching up after a flight in the 0.1.1 test), and its writer runs on this thread,
+					// so this is exactly what the export just rendered. Save it so the file matches too.
+					LongOpenHashSet exported = AomcVisitedClient.VISITED.snapshot(key);
+					AomcVisitedClient.VISITED.save();
+					Component message = clean(result.getFolderToOpen(), exported);
 					AomcVisitedClient.LOGGER.info(message.getString());
 					if (client.player != null) {
 						client.player.sendSystemMessage(message);
