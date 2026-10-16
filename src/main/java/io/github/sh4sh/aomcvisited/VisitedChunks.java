@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -295,6 +296,13 @@ public final class VisitedChunks {
 		dirty.add(export.key());
 		save();
 		return forgotten;
+	}
+
+	/** The normal-map (not cave layer) records that have chunks, e.g. {@code minecraft:overworld}. */
+	public synchronized List<String> surfaceKeys() {
+		return records.entrySet().stream()
+				.filter(record -> !record.getKey().contains("/") && !record.getValue().isEmpty())
+				.map(Map.Entry::getKey).toList();
 	}
 
 	/** A copy of one record (empty if there is none). */
