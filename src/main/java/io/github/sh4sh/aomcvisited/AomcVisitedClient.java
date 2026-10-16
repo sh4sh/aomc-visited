@@ -19,6 +19,7 @@ import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 
 public class AomcVisitedClient implements ClientModInitializer {
@@ -34,7 +35,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 			new Settings(FabricLoader.getInstance().getGameDir().resolve(MOD_ID).resolve("settings.properties"));
 
 	private int ticksSinceSave;
-	/** The export screen opens a tick after the command, since the chat screen closes after running it. */
+	/** The export starts a tick after the command, once the chat screen has closed. */
 	private boolean exportNextTick;
 
 	@Override
@@ -46,7 +47,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
 				ClientCommands.literal("visited")
 						.executes(context -> showCounts(context.getSource()))
-						.then(ClientCommands.literal("export").executes(context -> requestExport(context.getSource())))
+						.then(ClientCommands.literal("export")
+								.executes(context -> requestExport(context.getSource(), false))
+								.then(ClientCommands.literal("anyway").executes(context -> requestExport(context.getSource(), true))))
 						.then(ClientCommands.literal("clear")
 								.executes(context -> clear(context.getSource(), false))
 								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true))))
@@ -66,7 +69,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 	private void tick(Minecraft client) {
 		if (exportNextTick) {
 			exportNextTick = false;
-			Component error = XaeroExport.open(client);
+			Component error = XaeroExport.start(client);
 			if (error != null && client.player != null) {
 				client.player.sendSystemMessage(error);
 			}
@@ -152,10 +155,28 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/** {@code /visited export}: opens Xaero's export screen on the next tick (see {@link #exportNextTick}). */
-	private int requestExport(FabricClientCommandSource source) {
+	/**
+	 * {@code /visited export [anyway]}: starts the export on the next tick (see {@link #exportNextTick}).
+	 * Xaero colours its map from block textures, so a resource pack changes the exported colours; unless
+	 * {@code anyway}, refuse while one of the player's own packs is on.
+	 */
+	private int requestExport(FabricClientCommandSource source, boolean anyway) {
 		if (!xaeroInstalled()) {
 			source.sendError(Component.literal("Exporting needs Xaero's World Map."));
+			return 0;
+		}
+		// The player's own packs have ids like "file/<name>"; built-in and mod packs don't.
+		List<String> packs = source.getClient().getResourcePackRepository().getSelectedIds().stream()
+				.filter(id -> id.startsWith("file/")).map(id -> id.substring("file/".length())).toList();
+		if (!packs.isEmpty() && !anyway) {
+			Component button = Component.literal("[Export anyway]").withStyle(style -> style
+					.withColor(ChatFormatting.RED)
+					.withUnderlined(true)
+					.withClickEvent(new ClickEvent.RunCommand("/visited export anyway"))
+					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Export with the resource packs on"))));
+			source.sendFeedback(Component.literal("Resource packs change the colours of the exported map ("
+					+ String.join(", ", packs) + "). Turn them off in Options > Resource Packs, then run /visited"
+					+ " export again. ").withStyle(ChatFormatting.GOLD).append(button));
 			return 0;
 		}
 		exportNextTick = true;

@@ -238,13 +238,19 @@ public final class VisitedChunks {
 		return forgotten;
 	}
 
+	/** How many writes Xaero has made this session; pass to {@link #rememberExport}. */
+	public synchronized long writes() {
+		return writes;
+	}
+
 	/**
-	 * Remembers what an export contained, so it can be marked as uploaded later this session. Returns its
-	 * number for {@link #markUploaded}.
+	 * Remembers what an export contained, so it can be marked as uploaded later this session; chunks written
+	 * after {@code writesAtStart} are newer than the export and won't be forgotten. Returns its number for
+	 * {@link #markUploaded}.
 	 */
-	public synchronized int rememberExport(String key, LongOpenHashSet chunks) {
+	public synchronized int rememberExport(String key, LongOpenHashSet chunks, long writesAtStart) {
 		int number = nextExport++;
-		exports.put(number, new Export(key, chunks, writes));
+		exports.put(number, new Export(key, chunks, writesAtStart));
 		return number;
 	}
 
