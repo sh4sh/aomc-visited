@@ -112,12 +112,13 @@ public class AomcVisitedClient implements ClientModInitializer {
 			source.sendFeedback(Chat.error("Not connected to a world."));
 			return 0;
 		}
-		Map<String, Integer> counts = VISITED.counts();
-		MutableComponent message = Chat.info("Chunks recorded on " + server + ":");
+		Map<String, Integer> counts = new java.util.TreeMap<>(VISITED.counts());
+		counts.values().removeIf(count -> count == 0);
+		MutableComponent message = Chat.info("Chunks recorded on " + server.substring(server.indexOf('/') + 1) + ":");
 		if (counts.isEmpty()) {
 			message.append(Chat.line("none yet"));
 		}
-		counts.forEach((key, count) -> message.append(Chat.line(key + ": " + count)));
+		counts.forEach((key, count) -> message.append(Chat.line(shortName(key) + ": " + count)));
 		source.sendFeedback(message);
 		return 1;
 	}

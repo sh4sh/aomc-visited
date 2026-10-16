@@ -126,9 +126,12 @@ public final class XaeroExport {
 					+ " Xaero's World Map may not be supported.");
 		}
 		List<String> names = keys.stream().map(XaeroExport::shortName).toList();
-		Chat.send(client, Chat.info("Exporting " + String.join(", ", names) + ". Progress shows above your"
-				+ " hotbar. Xaero's map switches dimension while it works, and the game may freeze for a few"
-				+ " seconds."));
+		// Only mention switching when Xaero's map will show another dimension than it does now.
+		ResourceKey<Level> showing = processor.getMapWorld().getCurrentDimensionId();
+		boolean switches = keys.size() > 1 || showing == null || !keys.getFirst().equals(showing.identifier().toString());
+		Chat.send(client, Chat.info("Exporting " + String.join(", ", names) + ". Progress shows above your hotbar."
+				+ (switches ? " Xaero's map switches dimension while it works, and the" : " The")
+				+ " game may freeze for a few seconds."));
 		job = new Job(client, processor, keys, whenDone);
 		lastProgress = System.currentTimeMillis();
 		job.startDimension();
