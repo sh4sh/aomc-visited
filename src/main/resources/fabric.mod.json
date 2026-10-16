@@ -13,6 +13,9 @@
 			"io.github.sh4sh.aomcvisited.AomcVisitedClient"
 		]
 	},
+	"mixins": [
+		"aomc_visited.mixins.json"
+	],
 	"depends": {
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",
