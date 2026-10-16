@@ -219,7 +219,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 			return 0;
 		}
 		if (restored == 0) {
-			source.sendFeedback(Chat.info("Nothing to restore: forgotten map data is only kept for a day."));
+			source.sendFeedback(Chat.info("Nothing left to restore."));
 			return 1;
 		}
 		if (xaeroInstalled()) {
