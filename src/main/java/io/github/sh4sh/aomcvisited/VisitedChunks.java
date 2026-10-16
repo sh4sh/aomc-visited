@@ -1,11 +1,15 @@
 package io.github.sh4sh.aomcvisited;
 
+import it.unimi.dsi.fastutil.longs.Long2LongMap;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.util.Util;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -26,7 +30,9 @@ import java.util.stream.Stream;
  *
  * <p>Xaero only maps a chunk while it and all 8 of its neighbours are loaded, so the outer ring of what the
  * server sends is never mapped and may still hold old map data. We track the chunks loaded right now (chunk
- * data packets add, forget packets remove) and record a chunk once its whole 3x3 neighbourhood is loaded.
+ * data packets add, forget packets remove) and record a chunk once its whole 3x3 neighbourhood has stayed
+ * loaded for {@link #DWELL_MS}. Without the wait, about 1 in 12 chunks on the edge of an elytra flight
+ * unloaded before Xaero mapped it (AOMC test, October 2026).
  *
  * <p>Stored as text under {@code <game dir>/aomc_visited/<server>/<namespace>/<dimension>.txt}, one
  * {@code x,z} chunk coordinate per line. Methods are synchronized because the disconnect event may
@@ -35,6 +41,8 @@ import java.util.stream.Stream;
 public final class VisitedChunks {
 	private static final String HEADER = "# AOMC Visited: chunks Xaero could map (loaded with all 8 neighbours),"
 			+ " as chunk x,z (multiply by 16 for block coordinates)";
+	/** How long a chunk's neighbourhood must stay loaded before we count it as mapped. */
+	private static final long DWELL_MS = 3000;
 
 	private final Path root;
 	/** Folder name of the current server, or null when not connected. */
@@ -47,6 +55,8 @@ public final class VisitedChunks {
 	private final LongOpenHashSet loaded = new LongOpenHashSet();
 	/** The level {@link #loaded} belongs to; a new level (dimension change, respawn) starts empty. */
 	private ClientLevel loadedLevel;
+	/** Chunks whose neighbourhood is loaded but not yet for {@link #DWELL_MS}, to when it became loaded. */
+	private final Long2LongOpenHashMap pending = new Long2LongOpenHashMap();
 
 	public VisitedChunks(Path root) {
 		this.root = root;
@@ -59,16 +69,18 @@ public final class VisitedChunks {
 		}
 		if (level != loadedLevel) {
 			loaded.clear();
+			pending.clear();
 			loadedLevel = level;
 		}
 		loaded.add(ChunkPos.pack(x, z));
 		// The new chunk can complete its own neighbourhood or any of its 8 neighbours'.
-		String dim = level.dimension().identifier().toString();
-		LongOpenHashSet chunks = byDimension.computeIfAbsent(dim, d -> new LongOpenHashSet());
+		LongOpenHashSet chunks = currentChunks();
+		long now = Util.getMillis();
 		for (int dx = -1; dx <= 1; dx++) {
 			for (int dz = -1; dz <= 1; dz++) {
-				if (neighbourhoodLoaded(x + dx, z + dz) && chunks.add(ChunkPos.pack(x + dx, z + dz))) {
-					dirty.add(dim);
+				long pos = ChunkPos.pack(x + dx, z + dz);
+				if (!chunks.contains(pos) && !pending.containsKey(pos) && neighbourhoodLoaded(x + dx, z + dz)) {
+					pending.put(pos, now);
 				}
 			}
 		}
@@ -76,9 +88,37 @@ public final class VisitedChunks {
 
 	/** Called for every forget-chunk packet, on the main thread. */
 	public synchronized void chunkUnloaded(ClientLevel level, int x, int z) {
-		if (level == loadedLevel) {
-			loaded.remove(ChunkPos.pack(x, z));
+		if (level != loadedLevel) {
+			return;
 		}
+		loaded.remove(ChunkPos.pack(x, z));
+		// The neighbourhoods this chunk belonged to are broken; they start over if it comes back.
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				pending.remove(ChunkPos.pack(x + dx, z + dz));
+			}
+		}
+	}
+
+	/** Records the pending chunks whose neighbourhood has stayed loaded long enough. Call regularly. */
+	public synchronized void tick() {
+		if (pending.isEmpty() || loadedLevel == null) {
+			return;
+		}
+		LongOpenHashSet chunks = currentChunks();
+		long now = Util.getMillis();
+		for (ObjectIterator<Long2LongMap.Entry> it = pending.long2LongEntrySet().fastIterator(); it.hasNext(); ) {
+			Long2LongMap.Entry entry = it.next();
+			if (now - entry.getLongValue() >= DWELL_MS) {
+				chunks.add(entry.getLongKey());
+				it.remove();
+				dirty.add(loadedLevel.dimension().identifier().toString());
+			}
+		}
+	}
+
+	private LongOpenHashSet currentChunks() {
+		return byDimension.computeIfAbsent(loadedLevel.dimension().identifier().toString(), d -> new LongOpenHashSet());
 	}
 
 	private boolean neighbourhoodLoaded(int x, int z) {
@@ -125,6 +165,7 @@ public final class VisitedChunks {
 		byDimension.clear();
 		dirty.clear();
 		loaded.clear();
+		pending.clear();
 		loadedLevel = null;
 	}
 

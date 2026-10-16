@@ -33,6 +33,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> VISITED.close());
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			VISITED.tick();
 			if (++ticksSinceSave >= AUTOSAVE_TICKS) {
 				ticksSinceSave = 0;
 				VISITED.save();
