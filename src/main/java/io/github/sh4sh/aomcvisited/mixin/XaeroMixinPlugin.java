@@ -8,11 +8,11 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 import java.util.List;
 import java.util.Set;
 
-/** Applies the mixins into Xaero's World Map only when it's installed. */
+/** Every mixin in this config targets Xaero's World Map, so apply them only when it's installed. */
 public class XaeroMixinPlugin implements IMixinConfigPlugin {
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-		return !targetClassName.startsWith("xaero.") || FabricLoader.getInstance().isModLoaded("xaeroworldmap");
+		return FabricLoader.getInstance().isModLoaded("xaeroworldmap");
 	}
 
 	@Override

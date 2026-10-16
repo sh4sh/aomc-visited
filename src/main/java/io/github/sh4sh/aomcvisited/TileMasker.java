@@ -30,8 +30,7 @@ public final class TileMasker {
 	 * @param tiles            tile images found
 	 * @param tilesDeleted     tiles with no visited chunk at all, deleted instead of left fully black
 	 * @param chunksKept       visited chunks with terrain
-	 * @param chunksBlackedOut chunks with terrain that weren't visited (older map data, or ground mapped
-	 *                         too briefly to be sure of)
+	 * @param chunksBlackedOut chunks with terrain that weren't visited (older map data)
 	 */
 	public record Result(int tiles, int tilesDeleted, int chunksKept, int chunksBlackedOut) {
 	}

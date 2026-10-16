@@ -3,7 +3,6 @@ package io.github.sh4sh.aomcvisited;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
@@ -43,7 +42,7 @@ public final class VisitedChunks {
 	/** Folder name of the current server, or null when not connected. */
 	private String server;
 	/** Record key (see the class comment) to packed chunk positions. */
-	private final Map<String, LongOpenHashSet> byDimension = new TreeMap<>();
+	private final Map<String, LongOpenHashSet> records = new TreeMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
 	public VisitedChunks(Path root) {
@@ -63,10 +62,10 @@ public final class VisitedChunks {
 			if (client.getConnection() == null) {
 				return;
 			}
-			open(serverKey(client, client.getConnection()));
+			open(serverKey(client));
 		}
 		String key = recordKey(dimension, layer);
-		if (byDimension.computeIfAbsent(key, k -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
+		if (records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
 			dirty.add(key);
 		}
 	}
@@ -89,8 +88,8 @@ public final class VisitedChunks {
 					continue;
 				}
 				String path = rel.subpath(1, rel.getNameCount()).toString().replace('\\', '/');
-				String dim = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
-				byDimension.put(dim, load(file));
+				String key = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
+				records.put(key, load(file));
 			}
 		} catch (IOException e) {
 			AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", dir, e);
@@ -101,19 +100,19 @@ public final class VisitedChunks {
 	public synchronized void close() {
 		save();
 		server = null;
-		byDimension.clear();
+		records.clear();
 		dirty.clear();
 	}
 
-	/** Writes the dimensions that changed since the last save. */
+	/** Writes the records that changed since the last save. */
 	public synchronized void save() {
 		if (server == null) {
 			return;
 		}
-		for (String dim : dirty) {
-			Path file = fileFor(dim);
+		for (String key : dirty) {
+			Path file = fileFor(key);
 			try {
-				write(file, byDimension.get(dim));
+				write(file, records.get(key));
 			} catch (IOException e) {
 				AomcVisitedClient.LOGGER.error("Could not save visited chunks to {}", file, e);
 			}
@@ -127,26 +126,26 @@ public final class VisitedChunks {
 
 	/** A copy of one record (empty if there is none). */
 	public synchronized LongOpenHashSet snapshot(String key) {
-		LongOpenHashSet chunks = byDimension.get(key);
+		LongOpenHashSet chunks = records.get(key);
 		return chunks == null ? new LongOpenHashSet() : new LongOpenHashSet(chunks);
 	}
 
 	/** Chunk counts per record for the current server. */
 	public synchronized Map<String, Integer> counts() {
 		Map<String, Integer> counts = new TreeMap<>();
-		byDimension.forEach((dim, chunks) -> counts.put(dim, chunks.size()));
+		records.forEach((key, chunks) -> counts.put(key, chunks.size()));
 		return counts;
 	}
 
 	/**
 	 * A folder name for the server: its address for multiplayer, the world's folder for single-player.
 	 */
-	public static String serverKey(Minecraft client, ClientPacketListener listener) {
+	public static String serverKey(Minecraft client) {
 		if (client.isLocalServer() && client.getSingleplayerServer() != null) {
 			Path world = client.getSingleplayerServer().getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
 			return "singleplayer/" + sanitize(world.getFileName().toString());
 		}
-		ServerData data = listener.getServerData();
+		ServerData data = client.getConnection() == null ? null : client.getConnection().getServerData();
 		return "server/" + sanitize(data != null ? data.ip : "unknown");
 	}
 
@@ -154,9 +153,10 @@ public final class VisitedChunks {
 		return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
 	}
 
-	private Path fileFor(String dim) {
-		int colon = dim.indexOf(':');
-		return root.resolve(server).resolve(dim.substring(0, colon)).resolve(dim.substring(colon + 1) + ".txt");
+	/** {@code minecraft:overworld/cave_5} is stored as {@code minecraft/overworld/cave_5.txt}. */
+	private Path fileFor(String key) {
+		int colon = key.indexOf(':');
+		return root.resolve(server).resolve(key.substring(0, colon)).resolve(key.substring(colon + 1) + ".txt");
 	}
 
 	private static LongOpenHashSet load(Path file) throws IOException {
