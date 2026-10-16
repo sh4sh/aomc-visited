@@ -164,7 +164,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		long now = System.currentTimeMillis();
 		List<VisitedChunks.Earlier> expired = VISITED.expired();
 		if (!expired.isEmpty()) {
-			MutableComponent message = Chat.info("Forgot map data from more than a day ago, since it may be out of"
+			MutableComponent message = Chat.info("Forgot map data from more than an hour ago, since it may be out of"
 					+ " date by now:");
 			for (VisitedChunks.Earlier record : expired) {
 				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
@@ -181,7 +181,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
 					+ ago(now - record.savedMillis())));
 		}
-		message.append(Chat.line("Export and upload? It's forgotten after a day."));
+		message.append(Chat.line("Export and upload? It's forgotten after an hour."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
 						"Export it now, with anything you map from here on"),

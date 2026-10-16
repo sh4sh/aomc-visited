@@ -86,7 +86,7 @@ public final class VisitedChunks {
 	 * sessions is for a crash or a short break; older ground may be out of date, and the webmap can't tell
 	 * (sh4sh, October 2026).
 	 */
-	public static final long FORGET_AFTER_MS = 24 * 60 * 60 * 1000L;
+	public static final long FORGET_AFTER_MS = 60 * 60 * 1000L;
 
 	/** A record from an earlier session: its key, chunk count, and when it was last saved. */
 	public record Earlier(String key, int chunks, long savedMillis) {
