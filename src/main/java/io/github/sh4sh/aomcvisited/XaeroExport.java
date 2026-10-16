@@ -154,6 +154,15 @@ public final class XaeroExport {
 			if (!processor.getMapSaveLoad().exportPNG(screen, selection)) {
 				return red("Xaero's World Map is already exporting. Try again when it's done.");
 			}
+			// Xaero runs the export a moment later, so these get drawn before the game freezes.
+			if (index == 0) {
+				tell(Component.literal("Exporting " + (areas.size() == 1 ? "1 area" : areas.size() + " areas") + " of "
+						+ key + ". The game will freeze for a few seconds" + (areas.size() == 1 ? "." : " per area.")));
+			}
+			if (client.player != null) {
+				client.player.sendOverlayMessage(Component.literal("Exporting area " + (index + 1) + " of "
+						+ areas.size() + "…"));
+			}
 			return null;
 		}
 
