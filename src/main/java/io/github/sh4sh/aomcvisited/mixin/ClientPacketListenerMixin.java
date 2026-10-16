@@ -3,6 +3,7 @@ package io.github.sh4sh.aomcvisited.mixin;
 import io.github.sh4sh.aomcvisited.AomcVisitedClient;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -15,13 +16,18 @@ public abstract class ClientPacketListenerMixin {
 	@Shadow
 	private ClientLevel level;
 
-	/**
-	 * Records each chunk the server sends. The handler starts by re-queuing itself on the main thread
-	 * (ensureRunningOnSameThread throws on the network thread), so reaching TAIL means we're on the main
-	 * thread and the chunk is in the client world.
+	/*
+	 * Both handlers start by re-queuing themselves on the main thread (ensureRunningOnSameThread throws on
+	 * the network thread), so reaching TAIL means we're on the main thread and the client world is updated.
 	 */
+
 	@Inject(method = "handleLevelChunkWithLight", at = @At("TAIL"))
-	private void aomcVisited$recordChunk(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
-		AomcVisitedClient.VISITED.record((ClientPacketListener) (Object) this, level.dimension(), packet.x(), packet.z());
+	private void aomcVisited$chunkLoaded(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
+		AomcVisitedClient.VISITED.chunkLoaded((ClientPacketListener) (Object) this, level, packet.x(), packet.z());
+	}
+
+	@Inject(method = "handleForgetLevelChunk", at = @At("TAIL"))
+	private void aomcVisited$chunkUnloaded(ClientboundForgetLevelChunkPacket packet, CallbackInfo ci) {
+		AomcVisitedClient.VISITED.chunkUnloaded(level, packet.pos().x(), packet.pos().z());
 	}
 }

@@ -3,11 +3,10 @@ package io.github.sh4sh.aomcvisited;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.BufferedWriter;
@@ -23,15 +22,19 @@ import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /**
- * The chunks the server has sent this player, per server and per dimension.
+ * The chunks Xaero's World Map could map this session, per server and per dimension.
+ *
+ * <p>Xaero only maps a chunk while it and all 8 of its neighbours are loaded, so the outer ring of what the
+ * server sends is never mapped and may still hold old map data. We track the chunks loaded right now (chunk
+ * data packets add, forget packets remove) and record a chunk once its whole 3x3 neighbourhood is loaded.
  *
  * <p>Stored as text under {@code <game dir>/aomc_visited/<server>/<namespace>/<dimension>.txt}, one
  * {@code x,z} chunk coordinate per line. Methods are synchronized because the disconnect event may
  * arrive off the main thread.
  */
 public final class VisitedChunks {
-	private static final String HEADER = "# AOMC Visited: chunks received from the server, as chunk x,z"
-			+ " (multiply by 16 for block coordinates)";
+	private static final String HEADER = "# AOMC Visited: chunks Xaero could map (loaded with all 8 neighbours),"
+			+ " as chunk x,z (multiply by 16 for block coordinates)";
 
 	private final Path root;
 	/** Folder name of the current server, or null when not connected. */
@@ -40,19 +43,53 @@ public final class VisitedChunks {
 	private final Map<String, LongOpenHashSet> byDimension = new TreeMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
+	/** Chunks loaded in the client right now, in {@link #loadedLevel}. */
+	private final LongOpenHashSet loaded = new LongOpenHashSet();
+	/** The level {@link #loaded} belongs to; a new level (dimension change, respawn) starts empty. */
+	private ClientLevel loadedLevel;
+
 	public VisitedChunks(Path root) {
 		this.root = root;
 	}
 
 	/** Called for every chunk data packet, on the main thread. */
-	public synchronized void record(ClientPacketListener listener, ResourceKey<Level> dimension, int x, int z) {
+	public synchronized void chunkLoaded(ClientPacketListener listener, ClientLevel level, int x, int z) {
 		if (server == null) {
 			open(serverKey(Minecraft.getInstance(), listener));
 		}
-		String dim = dimension.identifier().toString();
-		if (byDimension.computeIfAbsent(dim, d -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
-			dirty.add(dim);
+		if (level != loadedLevel) {
+			loaded.clear();
+			loadedLevel = level;
 		}
+		loaded.add(ChunkPos.pack(x, z));
+		// The new chunk can complete its own neighbourhood or any of its 8 neighbours'.
+		String dim = level.dimension().identifier().toString();
+		LongOpenHashSet chunks = byDimension.computeIfAbsent(dim, d -> new LongOpenHashSet());
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (neighbourhoodLoaded(x + dx, z + dz) && chunks.add(ChunkPos.pack(x + dx, z + dz))) {
+					dirty.add(dim);
+				}
+			}
+		}
+	}
+
+	/** Called for every forget-chunk packet, on the main thread. */
+	public synchronized void chunkUnloaded(ClientLevel level, int x, int z) {
+		if (level == loadedLevel) {
+			loaded.remove(ChunkPos.pack(x, z));
+		}
+	}
+
+	private boolean neighbourhoodLoaded(int x, int z) {
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (!loaded.contains(ChunkPos.pack(x + dx, z + dz))) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/** Switches to the given server's record, loading it from disk. */
@@ -87,6 +124,8 @@ public final class VisitedChunks {
 		server = null;
 		byDimension.clear();
 		dirty.clear();
+		loaded.clear();
+		loadedLevel = null;
 	}
 
 	/** Writes the dimensions that changed since the last save. */
