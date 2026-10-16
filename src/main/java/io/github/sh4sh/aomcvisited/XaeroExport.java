@@ -13,10 +13,15 @@ import xaero.map.gui.ExportScreen;
 import xaero.map.gui.MapTileSelection;
 import xaero.map.world.MapDimension;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Everything that touches Xaero's World Map. Only load this class when
@@ -25,6 +30,9 @@ import java.util.regex.Pattern;
 final class XaeroExport {
 	/** Xaero names each export folder after the time it was made, e.g. {@code 2026-10-15_23.52.26}. */
 	private static final Pattern EXPORT_FOLDER = Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}");
+	/** A single-image export: the timestamp, the corner, and {@code _<n>} if Xaero found the name taken. */
+	private static final Pattern SINGLE_IMAGE =
+			Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}_x(-?\\d+)_z(-?\\d+)(?:_\\d+)?\\.png");
 
 	private XaeroExport() {
 	}
@@ -65,6 +73,7 @@ final class XaeroExport {
 		}
 		MapTileSelection selection = new MapTileSelection(minX, minZ);
 		selection.setEnd(maxX, maxZ);
+		Area area = new Area(minX * 16, minZ * 16, (maxX - minX + 1) * 16, (maxZ - minZ + 1) * 16);
 
 		client.gui.setScreen(new ExportScreen(null, null, processor, selection) {
 			@Override
@@ -79,7 +88,7 @@ final class XaeroExport {
 					LongOpenHashSet exported = AomcVisitedClient.VISITED.snapshot(key);
 					int changedCount = AomcVisitedClient.VISITED.changedCount(key);
 					AomcVisitedClient.VISITED.save();
-					Component message = clean(result.getFolderToOpen(), exported, changedCount);
+					Component message = clean(result.getFolderToOpen(), area, exported, changedCount);
 					AomcVisitedClient.LOGGER.info(message.getString());
 					if (client.player != null) {
 						client.player.sendSystemMessage(message);
@@ -90,42 +99,86 @@ final class XaeroExport {
 		return null;
 	}
 
-	private static Component clean(Path folder, LongOpenHashSet chunks, int changedCount) {
-		TileMasker.Result result;
-		try {
-			result = TileMasker.mask(folder, (x, z) -> chunks.contains(ChunkPos.pack(x, z)));
-		} catch (IOException | RuntimeException e) {
-			AomcVisitedClient.LOGGER.error("Could not clean the export in {}", folder, e);
-			return Component.literal("Could not clean the export (" + e.getMessage() + "). Don't upload it: it may"
-					+ " contain older map data. " + markNotCleaned(folder)).withStyle(ChatFormatting.RED);
-		}
-		if (result.tiles() == 0) {
-			// With Multiple Unscaled Images off, Xaero writes one image straight into "map exports".
-			return Component.literal("That export wasn't made with Multiple Unscaled Images, so it wasn't"
-					+ " cleaned. Don't upload it: turn the option on and run /visited export again.")
-					.withStyle(ChatFormatting.RED);
-		}
-		return Component.literal("Export cleaned and ready to upload: " + folder + "\nKept " + result.chunksKept()
-				+ " chunks you visited (" + changedCount + " new or changed), blacked out " + result.chunksBlackedOut() + " chunks of older map, "
-				+ (result.tiles() - result.tilesDeleted()) + " of " + result.tiles() + " tiles left.")
-				.withStyle(ChatFormatting.GREEN);
+	/** The exported rectangle in blocks: its top-left corner and size. */
+	private record Area(int blockX, int blockZ, int width, int height) {
 	}
 
 	/**
-	 * Renames a half-cleaned export folder so nobody uploads it by mistake. Only Xaero's timestamped tile
-	 * folders, never {@code map exports} itself. Returns where the folder is now, for the player.
+	 * Cleans what Xaero just wrote. With Multiple Unscaled Images on, that's a timestamped folder of tiles,
+	 * except when the whole area fits in one tile: then Xaero writes a single unscaled image straight into
+	 * {@code map exports}, named {@code <timestamp>_x<X>_z<Z>.png} (the folder it reports is then
+	 * {@code map exports} itself). With the option off and a bigger area, the single image is scaled down and
+	 * can't be cleaned chunk by chunk.
 	 */
-	private static String markNotCleaned(Path folder) {
-		if (!EXPORT_FOLDER.matcher(folder.getFileName().toString()).matches()) {
-			return "It's in " + folder + ".";
-		}
-		Path marked = folder.resolveSibling(folder.getFileName() + "-NOT-CLEANED");
+	private static Component clean(Path folder, Area area, LongOpenHashSet chunks, int changedCount) {
+		TileMasker.Visited visited = (x, z) -> chunks.contains(ChunkPos.pack(x, z));
+		Path written = folder;
+		TileMasker.Result result;
 		try {
-			Files.move(folder, marked);
+			if (EXPORT_FOLDER.matcher(folder.getFileName().toString()).matches()) {
+				result = TileMasker.mask(folder, visited);
+			} else {
+				written = findSingleImage(folder, area);
+				if (written == null) {
+					return Component.literal("Couldn't find the exported image in " + folder + ", so it wasn't"
+							+ " cleaned. Don't upload it.").withStyle(ChatFormatting.RED);
+				}
+				BufferedImage image = ImageIO.read(written.toFile());
+				if (image == null || image.getWidth() != area.width() || image.getHeight() != area.height()) {
+					return Component.literal("That export was scaled down to fit one image, so it can't be cleaned."
+							+ " Don't upload it: turn on Multiple Unscaled Images and run /visited export again.")
+							.withStyle(ChatFormatting.RED);
+				}
+				result = TileMasker.maskImage(written, area.blockX(), area.blockZ(), visited);
+			}
+		} catch (IOException | RuntimeException e) {
+			AomcVisitedClient.LOGGER.error("Could not clean the export in {}", written, e);
+			return Component.literal("Could not clean the export (" + e.getMessage() + "). Don't upload it: it may"
+					+ " contain older map data. " + markNotCleaned(written)).withStyle(ChatFormatting.RED);
+		}
+		if (result.tiles() == 0) {
+			return Component.literal("Found no exported images in " + folder + ", so nothing was cleaned. Don't"
+					+ " upload anything from this export.").withStyle(ChatFormatting.RED);
+		}
+		return Component.literal("Export cleaned and ready to upload: " + written + "\nKept " + result.chunksKept()
+				+ " chunks you visited (" + changedCount + " new or changed), blacked out "
+				+ result.chunksBlackedOut() + " chunks of older map, " + (result.tiles() - result.tilesDeleted())
+				+ " of " + result.tiles() + " images left.")
+				.withStyle(ChatFormatting.GREEN);
+	}
+
+	/** The newest single-image export in {@code folder} whose name ends in this area's top-left corner. */
+	private static Path findSingleImage(Path folder, Area area) throws IOException {
+		try (Stream<Path> files = Files.list(folder)) {
+			return files.filter(p -> {
+				Matcher m = SINGLE_IMAGE.matcher(p.getFileName().toString());
+				return m.matches() && Integer.parseInt(m.group(1)) == area.blockX()
+						&& Integer.parseInt(m.group(2)) == area.blockZ();
+			}).max(Comparator.comparingLong(p -> p.toFile().lastModified())).orElse(null);
+		}
+	}
+
+	/**
+	 * Renames a half-cleaned export so nobody uploads it by mistake: a timestamped tile folder gets
+	 * {@code -NOT-CLEANED}, a single image gets {@code .NOT-CLEANED} after {@code .png} (so it no longer
+	 * looks like an image). Never touches {@code map exports} itself. Returns where it is now, for the player.
+	 */
+	private static String markNotCleaned(Path written) {
+		String name = written.getFileName().toString();
+		Path marked;
+		if (EXPORT_FOLDER.matcher(name).matches()) {
+			marked = written.resolveSibling(name + "-NOT-CLEANED");
+		} else if (SINGLE_IMAGE.matcher(name).matches()) {
+			marked = written.resolveSibling(name + ".NOT-CLEANED");
+		} else {
+			return "It's in " + written + ".";
+		}
+		try {
+			Files.move(written, marked);
 			return "It's been renamed to " + marked + ".";
 		} catch (IOException e) {
-			AomcVisitedClient.LOGGER.error("Could not rename {}", folder, e);
-			return "It's in " + folder + ".";
+			AomcVisitedClient.LOGGER.error("Could not rename {}", written, e);
+			return "It's in " + written + ".";
 		}
 	}
 }

@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Blacks out every chunk of a Xaero "Multiple Unscaled Images" export that isn't in the visited record, so
+ * Blacks out every chunk of an unscaled Xaero export that isn't in the visited record, so
  * only ground mapped this session reaches the webmap (which drops black). Plain Java with no game classes,
  * so it can be tested outside the game.
  *
@@ -33,6 +33,10 @@ public final class TileMasker {
 	 * @param chunksBlackedOut chunks with terrain that weren't visited (older map data)
 	 */
 	public record Result(int tiles, int tilesDeleted, int chunksKept, int chunksBlackedOut) {
+		Result plus(Result other) {
+			return new Result(tiles + other.tiles, tilesDeleted + other.tilesDeleted, chunksKept + other.chunksKept,
+					chunksBlackedOut + other.chunksBlackedOut);
+		}
 	}
 
 	private static final Pattern TILE = Pattern.compile("\\d+_\\d+_x(-?\\d+)_z(-?\\d+)\\.png");
@@ -47,54 +51,62 @@ public final class TileMasker {
 		try (Stream<Path> list = Files.list(folder)) {
 			files = list.filter(p -> TILE.matcher(p.getFileName().toString()).matches()).sorted().toList();
 		}
-		int deleted = 0, kept = 0, blackedOut = 0;
+		Result total = new Result(0, 0, 0, 0);
 		for (Path file : files) {
 			Matcher m = TILE.matcher(file.getFileName().toString());
 			m.matches();
-			int blockX = Integer.parseInt(m.group(1)), blockZ = Integer.parseInt(m.group(2));
-			if (Math.floorMod(blockX, 16) != 0 || Math.floorMod(blockZ, 16) != 0) {
-				throw new IOException("Tile is not chunk-aligned, refusing to guess: " + file);
-			}
-			BufferedImage image = ImageIO.read(file.toFile());
-			if (image == null) {
-				throw new IOException("Not a readable image: " + file);
-			}
-			int width = image.getWidth(), height = image.getHeight();
-			int[] pixels = image.getRGB(0, 0, width, height, null, 0, width);
-			int keptHere = 0, blackedHere = 0;
-			for (int cellZ = 0; cellZ * 16 < height; cellZ++) {
-				for (int cellX = 0; cellX * 16 < width; cellX++) {
-					int x0 = cellX * 16, z0 = cellZ * 16;
-					int x1 = Math.min(x0 + 16, width), z1 = Math.min(z0 + 16, height);
-					boolean terrain = hasTerrain(pixels, width, x0, z0, x1, z1);
-					if (visited.contains(Math.floorDiv(blockX, 16) + cellX, Math.floorDiv(blockZ, 16) + cellZ)) {
-						if (terrain) {
-							keptHere++;
-						}
-					} else if (terrain) {
-						blackedHere++;
-						for (int z = z0; z < z1; z++) {
-							Arrays.fill(pixels, z * width + x0, z * width + x1, BLACK);
-						}
+			total = total.plus(maskImage(file, Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), visited));
+		}
+		return total;
+	}
+
+	/**
+	 * Masks one unscaled image whose top-left pixel is block ({@code blockX}, {@code blockZ}): a tile, or the
+	 * single image Xaero writes when the whole export fits in one tile. Deletes it if no visited chunk with
+	 * terrain is left.
+	 */
+	public static Result maskImage(Path file, int blockX, int blockZ, Visited visited) throws IOException {
+		if (Math.floorMod(blockX, 16) != 0 || Math.floorMod(blockZ, 16) != 0) {
+			throw new IOException("Image is not chunk-aligned, refusing to guess: " + file);
+		}
+		BufferedImage image = ImageIO.read(file.toFile());
+		if (image == null) {
+			throw new IOException("Not a readable image: " + file);
+		}
+		int width = image.getWidth(), height = image.getHeight();
+		int[] pixels = image.getRGB(0, 0, width, height, null, 0, width);
+		int kept = 0, blackedOut = 0;
+		for (int cellZ = 0; cellZ * 16 < height; cellZ++) {
+			for (int cellX = 0; cellX * 16 < width; cellX++) {
+				int x0 = cellX * 16, z0 = cellZ * 16;
+				int x1 = Math.min(x0 + 16, width), z1 = Math.min(z0 + 16, height);
+				boolean terrain = hasTerrain(pixels, width, x0, z0, x1, z1);
+				if (visited.contains(Math.floorDiv(blockX, 16) + cellX, Math.floorDiv(blockZ, 16) + cellZ)) {
+					if (terrain) {
+						kept++;
+					}
+				} else if (terrain) {
+					blackedOut++;
+					for (int z = z0; z < z1; z++) {
+						Arrays.fill(pixels, z * width + x0, z * width + x1, BLACK);
 					}
 				}
 			}
-			kept += keptHere;
-			blackedOut += blackedHere;
-			if (keptHere == 0) {
-				Files.delete(file);
-				deleted++;
-			} else if (blackedHere > 0) {
-				image.setRGB(0, 0, width, height, pixels, 0, width);
-				// Write beside the tile and swap it in, so a failure never leaves a half-written tile.
-				Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-				if (!ImageIO.write(image, "png", tmp.toFile())) {
-					throw new IOException("No PNG writer for " + file);
-				}
-				Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-			}
 		}
-		return new Result(files.size(), deleted, kept, blackedOut);
+		if (kept == 0) {
+			Files.delete(file);
+			return new Result(1, 1, 0, blackedOut);
+		}
+		if (blackedOut > 0) {
+			image.setRGB(0, 0, width, height, pixels, 0, width);
+			// Write beside the image and swap it in, so a failure never leaves a half-written image.
+			Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+			if (!ImageIO.write(image, "png", tmp.toFile())) {
+				throw new IOException("No PNG writer for " + file);
+			}
+			Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+		}
+		return new Result(1, 0, kept, blackedOut);
 	}
 
 	private static boolean hasTerrain(int[] pixels, int width, int x0, int z0, int x1, int z1) {
