@@ -59,9 +59,11 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.executes(context -> clear(context.getSource(), false))
 								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true))))
 						.then(ClientCommands.literal("uploaded")
+								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
 										markUploaded(context.getSource(), IntegerArgumentType.getInteger(context, "export")))))
 						.then(ClientCommands.literal("show")
+								.executes(context -> setShow(context.getSource(), !SETTINGS.showOnMap()))
 								.then(ClientCommands.literal("on").executes(context -> setShow(context.getSource(), true)))
 								.then(ClientCommands.literal("off").executes(context -> setShow(context.getSource(), false))))));
 		if (xaeroInstalled()) {
@@ -132,8 +134,16 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/** {@code /visited uploaded <export>}: run by the [Mark as uploaded] button on an export message. */
+	/**
+	 * {@code /visited uploaded [<export>]}: the [Mark as uploaded] button runs it with the export's number;
+	 * typed without one, it marks the latest export.
+	 */
 	private static int markUploaded(FabricClientCommandSource source, int export) {
+		if (export < 0) {
+			source.sendError(Component.literal("There's no export from this session to mark as uploaded. To start"
+					+ " over, use /visited clear."));
+			return 0;
+		}
 		int forgotten = VISITED.markUploaded(export);
 		if (forgotten < 0) {
 			source.sendError(Component.literal("That export was already marked as uploaded, or is from before the"
@@ -148,15 +158,15 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/** {@code /visited show on|off}: the highlight on Xaero's World Map. */
+	/** {@code /visited show [on|off]}: the highlight on Xaero's World Map; without on/off it switches. */
 	private static int setShow(FabricClientCommandSource source, boolean show) {
 		SETTINGS.setShowOnMap(show);
 		if (xaeroInstalled()) {
 			VisitedHighlighter.refreshAll();
 		}
 		source.sendFeedback(Component.literal(show
-				? "Showing what the next export will keep on Xaero's World Map."
-				: "No longer showing the record on Xaero's World Map."));
+				? "Showing what the next export will keep on Xaero's World Map. Hide it with /visited show off."
+				: "No longer showing the record on Xaero's World Map. Show it again with /visited show on."));
 		return 1;
 	}
 
@@ -170,9 +180,11 @@ public class AomcVisitedClient implements ClientModInitializer {
 			source.sendError(Component.literal("Exporting needs Xaero's World Map."));
 			return 0;
 		}
-		// The player's own packs have ids like "file/<name>"; built-in and mod packs don't.
+		// The player's own packs have ids like "file/<name>"; built-in and mod packs don't. Pack names can
+		// contain colour codes (a tester's turned the rest of the message black), so strip them.
 		List<String> packs = source.getClient().getResourcePackRepository().getSelectedIds().stream()
-				.filter(id -> id.startsWith("file/")).map(id -> id.substring("file/".length())).toList();
+				.filter(id -> id.startsWith("file/"))
+				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
 		if (!packs.isEmpty() && !anyway) {
 			Component button = Component.literal("[Export anyway]").withStyle(style -> style
 					.withColor(ChatFormatting.RED)

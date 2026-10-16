@@ -254,6 +254,11 @@ public final class VisitedChunks {
 		return number;
 	}
 
+	/** The latest export that can still be marked as uploaded, or -1. */
+	public synchronized int latestExport() {
+		return exports.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1);
+	}
+
 	/**
 	 * Forgets the chunks an export contained, except those Xaero has written again since (they hold newer
 	 * data than what was uploaded). Returns how many were forgotten, or -1 if there's no such export this
