@@ -2,6 +2,7 @@ package io.github.sh4sh.aomcvisited;
 
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
@@ -96,16 +97,18 @@ final class XaeroExport {
 		} catch (IOException | RuntimeException e) {
 			AomcVisitedClient.LOGGER.error("Could not clean the export in {}", folder, e);
 			return Component.literal("Could not clean the export (" + e.getMessage() + "). Don't upload it: it may"
-					+ " contain older map data. " + markNotCleaned(folder));
+					+ " contain older map data. " + markNotCleaned(folder)).withStyle(ChatFormatting.RED);
 		}
 		if (result.tiles() == 0) {
 			// With Multiple Unscaled Images off, Xaero writes one image straight into "map exports".
 			return Component.literal("That export wasn't made with Multiple Unscaled Images, so it wasn't"
-					+ " cleaned. Don't upload it: turn the option on and run /visited export again.");
+					+ " cleaned. Don't upload it: turn the option on and run /visited export again.")
+					.withStyle(ChatFormatting.RED);
 		}
 		return Component.literal("Export cleaned and ready to upload: " + folder + "\nKept " + result.chunksKept()
 				+ " chunks you visited (" + changedCount + " new or changed), blacked out " + result.chunksBlackedOut() + " chunks of older map, "
-				+ (result.tiles() - result.tilesDeleted()) + " of " + result.tiles() + " tiles left.");
+				+ (result.tiles() - result.tilesDeleted()) + " of " + result.tiles() + " tiles left.")
+				.withStyle(ChatFormatting.GREEN);
 	}
 
 	/**
