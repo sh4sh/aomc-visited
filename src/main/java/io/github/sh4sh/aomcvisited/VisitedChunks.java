@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -27,8 +28,8 @@ import java.util.stream.Stream;
 
 /**
  * The chunks Xaero's World Map has written since the record was last cleared or marked as uploaded, per
- * server, dimension and map layer: the ground the player's Xaero map has fresh data for. {@code XaeroMapWriterMixin} reports each write. The record is kept across sessions;
- * "mark as uploaded" bookkeeping ({@link #writes}, exports) only lasts the session.
+ * server, dimension and map layer: the ground the player's Xaero map has fresh data for. {@code XaeroMapWriterMixin} reports each write. The record is kept across sessions,
+ * and so are exports not yet marked as uploaded ({@code exports.txt}).
  *
  * <p>Records are keyed like {@code minecraft:overworld} for the normal map, or
  * {@code minecraft:overworld/cave_<layer>} for one of Xaero's cave-mode layers, since an export covers one
@@ -39,6 +40,11 @@ import java.util.stream.Stream;
  * off the main thread.
  */
 public final class VisitedChunks {
+	private static final String EXPORTS_HEADER = "# AOMC Visited: exports not yet marked as uploaded."
+			+ " 'next <n>' is the next export's number; then one export per line: its number, its record, and the"
+			+ " chunks (x,z) it contained that haven't been mapped again since";
+	/** Exports never marked as uploaded are forgotten after this many newer ones. */
+	private static final int MAX_EXPORTS = 20;
 	private static final String HEADER = "# AOMC Visited: chunks Xaero's World Map wrote, as chunk x,z"
 			+ " (multiply by 16 for block coordinates); x,z,c = new or changed since the player's map had it";
 	/** Xaero's layer number for the normal (not cave-mode) map. */
@@ -61,9 +67,10 @@ public final class VisitedChunks {
 	private long writes;
 	/** Record key to each chunk's latest write this session ({@link #writes} at the time). */
 	private final Map<String, Long2LongOpenHashMap> lastWrite = new HashMap<>();
-	/** Exports made this session that can still be marked as uploaded, by number. */
+	/** Exports that can still be marked as uploaded, by number. */
 	private final Map<Integer, Export> exports = new HashMap<>();
 	private int nextExport = 1;
+	private boolean exportsDirty;
 
 	/** What an export contained: a record's chunks, and {@link #writes} when it was made. */
 	private record Export(String key, LongOpenHashSet chunks, long writes) {
@@ -148,6 +155,7 @@ public final class VisitedChunks {
 		if (!Files.isDirectory(dir)) {
 			return;
 		}
+		loadExports(dir.resolve("exports.txt"));
 		try (Stream<Path> files = Files.walk(dir)) {
 			for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".txt"))::iterator) {
 				Path rel = dir.relativize(file);
@@ -183,6 +191,8 @@ public final class VisitedChunks {
 		regionVersions.clear();
 		lastWrite.clear();
 		exports.clear();
+		nextExport = 1;
+		exportsDirty = false;
 		dirty.clear();
 	}
 
@@ -200,6 +210,9 @@ public final class VisitedChunks {
 			}
 		}
 		dirty.clear();
+		if (exportsDirty || !exports.isEmpty()) {
+			saveExports();
+		}
 	}
 
 	public synchronized String server() {
@@ -213,6 +226,9 @@ public final class VisitedChunks {
 	public synchronized int clear(ResourceKey<Level> dimension) {
 		String id = dimension.identifier().toString();
 		int forgotten = 0;
+		if (exports.values().removeIf(export -> export.key().equals(id) || export.key().startsWith(id + "/"))) {
+			exportsDirty = true;
+		}
 		for (String key : records.keySet().toArray(new String[0])) {
 			if (!key.equals(id) && !key.startsWith(id + "/")) {
 				continue;
@@ -245,13 +261,15 @@ public final class VisitedChunks {
 	}
 
 	/**
-	 * Remembers what an export contained, so it can be marked as uploaded later this session; chunks written
-	 * after {@code writesAtStart} are newer than the export and won't be forgotten. Returns its number for
-	 * {@link #markUploaded}.
+	 * Remembers what an export contained, so it can be marked as uploaded later (also after a restart);
+	 * chunks written after {@code writesAtStart} are newer than the export and won't be forgotten. Returns its
+	 * number for {@link #markUploaded}.
 	 */
 	public synchronized int rememberExport(String key, LongOpenHashSet chunks, long writesAtStart) {
 		int number = nextExport++;
 		exports.put(number, new Export(key, chunks, writesAtStart));
+		exportsDirty = true;
+		save();
 		return number;
 	}
 
@@ -262,14 +280,15 @@ public final class VisitedChunks {
 
 	/**
 	 * Forgets the chunks an export contained, except those Xaero has written again since (they hold newer
-	 * data than what was uploaded). Returns how many were forgotten, or -1 if there's no such export this
-	 * session (unknown number, already marked, or the game was restarted).
+	 * data than what was uploaded). Returns how many were forgotten, or -1 if there's no such export
+	 * (unknown number, already marked, or the record was cleared since).
 	 */
 	public synchronized int markUploaded(int number) {
 		Export export = exports.remove(number);
 		if (export == null || server == null) {
 			return -1;
 		}
+		exportsDirty = true;
 		LongOpenHashSet chunks = records.get(export.key());
 		if (chunks == null) {
 			return 0;
@@ -344,6 +363,82 @@ public final class VisitedChunks {
 
 	private static String sanitize(String name) {
 		return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
+	}
+
+	/**
+	 * Saves the exports not yet marked as uploaded. Write counts restart with the game, so instead of the
+	 * count each export is saved without the chunks mapped again since it was made; after loading, any
+	 * write counts as newer (see {@link #loadExports}).
+	 */
+	private void saveExports() {
+		Path file = root.resolve(server).resolve("exports.txt");
+		try {
+			if (exports.isEmpty()) {
+				Files.deleteIfExists(file);
+				exportsDirty = false;
+				return;
+			}
+			Files.createDirectories(file.getParent());
+			Path tmp = file.resolveSibling("exports.txt.tmp");
+			List<Integer> numbers = exports.keySet().stream().sorted(Comparator.reverseOrder()).toList();
+			try (BufferedWriter out = Files.newBufferedWriter(tmp)) {
+				out.write(EXPORTS_HEADER);
+				out.newLine();
+				out.write("next " + nextExport);
+				out.newLine();
+				for (int number : numbers.subList(0, Math.min(MAX_EXPORTS, numbers.size()))) {
+					Export export = exports.get(number);
+					LongOpenHashSet recorded = records.getOrDefault(export.key(), new LongOpenHashSet());
+					Long2LongOpenHashMap written = lastWrite.getOrDefault(export.key(), new Long2LongOpenHashMap());
+					StringBuilder line = new StringBuilder().append(number).append(' ').append(export.key());
+					for (LongIterator it = export.chunks().iterator(); it.hasNext(); ) {
+						long pos = it.nextLong();
+						if (recorded.contains(pos) && written.get(pos) <= export.writes()) {
+							line.append(' ').append(ChunkPos.getX(pos)).append(',').append(ChunkPos.getZ(pos));
+						}
+					}
+					out.write(line.toString());
+					out.newLine();
+				}
+			}
+			Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			exportsDirty = false;
+		} catch (IOException e) {
+			AomcVisitedClient.LOGGER.error("Could not save the exports to {}", file, e);
+		}
+	}
+
+	/** Loads saved exports with a write count of 0: every write from now on is newer than them. */
+	private void loadExports(Path file) {
+		if (!Files.isRegularFile(file)) {
+			return;
+		}
+		try {
+			for (String line : Files.readAllLines(file)) {
+				String[] fields = line.strip().split(" ");
+				try {
+					if (fields[0].isEmpty() || fields[0].startsWith("#")) {
+						continue;
+					}
+					if (fields[0].equals("next")) {
+						nextExport = Math.max(nextExport, Integer.parseInt(fields[1]));
+						continue;
+					}
+					int number = Integer.parseInt(fields[0]);
+					LongOpenHashSet chunks = new LongOpenHashSet();
+					for (int i = 2; i < fields.length; i++) {
+						String[] xz = fields[i].split(",");
+						chunks.add(ChunkPos.pack(Integer.parseInt(xz[0]), Integer.parseInt(xz[1])));
+					}
+					exports.put(number, new Export(fields[1], chunks, 0));
+					nextExport = Math.max(nextExport, number + 1);
+				} catch (RuntimeException e) {
+					AomcVisitedClient.LOGGER.warn("Skipping bad line in {}: {}", file, line);
+				}
+			}
+		} catch (IOException e) {
+			AomcVisitedClient.LOGGER.error("Could not read the exports from {}", file, e);
+		}
 	}
 
 	/** {@code minecraft:overworld/cave_5} is stored as {@code minecraft/overworld/cave_5.txt}. */

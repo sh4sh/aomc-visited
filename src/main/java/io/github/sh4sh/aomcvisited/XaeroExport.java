@@ -6,9 +6,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -115,21 +113,22 @@ public final class XaeroExport {
 	 */
 	static Component start(Minecraft client, Runnable whenDone) {
 		if (active()) {
-			return red("An export is already running.");
+			return Chat.error("An export is already running.");
 		}
 		WorldMapSession session = WorldMapSession.getCurrentSession();
 		MapProcessor processor = session == null ? null : session.getMapProcessor();
 		if (processor == null || !processor.isMapWorldUsable() || processor.getMapWorld() == null) {
-			return red("Xaero's World Map isn't ready yet. Open the world map once, then try again.");
+			return Chat.error("Xaero's World Map isn't ready yet. Open the world map once, then try again.");
 		}
 		List<String> keys = AomcVisitedClient.VISITED.surfaceKeys();
 		if (keys.isEmpty()) {
-			return red("Nothing recorded yet. If Xaero has been mapping and this stays empty, this version of"
+			return Chat.error("Nothing recorded yet. If Xaero has been mapping and this stays empty, this version of"
 					+ " Xaero's World Map may not be supported.");
 		}
 		List<String> names = keys.stream().map(XaeroExport::shortName).toList();
-		tell(client, Component.literal("Exporting " + String.join(", ", names) + ". Xaero's map switches"
-				+ " dimension while it works, and the game freezes for a few seconds per area."));
+		Chat.send(client, Chat.info("Exporting " + String.join(", ", names) + ". Progress shows above your"
+				+ " hotbar. Xaero's map switches dimension while it works, and the game may freeze for a few"
+				+ " seconds."));
 		job = new Job(client, processor, keys, whenDone);
 		lastProgress = System.currentTimeMillis();
 		job.startDimension();
@@ -149,6 +148,8 @@ public final class XaeroExport {
 		/** Xaero's write count at the start: chunks written later are kept by "mark as uploaded". */
 		private final long writesAtStart = AomcVisitedClient.VISITED.writes();
 		private final MutableComponent report = Component.empty();
+		private final List<Component> buttons = new ArrayList<>();
+		private int ticks;
 		private int dimension;
 		private Path root;
 		private boolean anyImages;
@@ -193,6 +194,9 @@ public final class XaeroExport {
 		}
 
 		void tick() {
+			if (++ticks % 20 == 1) {
+				showProgress();
+			}
 			switch (stage) {
 				case SWITCHING -> {
 					MapWorld world = processor.getMapWorld();
@@ -201,7 +205,7 @@ public final class XaeroExport {
 						stage(Stage.SETTLING);
 					} else if (inStage() > SWITCH_TIMEOUT_MS) {
 						line(red(shortName(keys.get(dimension)) + ": Xaero didn't switch its map to it in time,"
-								+ " so it was skipped."));
+								+ " so it was skipped. Try again."));
 						nextDimension();
 					}
 				}
@@ -227,6 +231,20 @@ public final class XaeroExport {
 			}
 		}
 
+		/**
+		 * Keeps the progress above the hotbar (it fades after a few seconds unless sent again). The dots move
+		 * while the game is running; they stop while Xaero's export freezes it.
+		 */
+		private void showProgress() {
+			String name = shortName(keys.get(dimension));
+			String of = keys.size() > 1 ? " (" + (dimension + 1) + " of " + keys.size() + ")" : "";
+			String what = stage == Stage.SWITCHING || stage == Stage.SETTLING || run == null
+					? "switching Xaero's map to " + name + of
+					: "exporting " + name + of + ", area " + Math.min(run.index + 1, run.areas.size()) + " of "
+							+ run.areas.size();
+			Chat.status(client, what + ".".repeat(1 + ticks / 20 % 3), ChatFormatting.YELLOW);
+		}
+
 		private void beginDimensionExport() {
 			// The webmap's main maps (the Nether is mapped on the roof) are made with cave mode off; a cave
 			// mode export would be a separate feature.
@@ -244,12 +262,13 @@ public final class XaeroExport {
 				list.add(new int[] {ChunkPos.getX(pos), ChunkPos.getZ(pos)});
 			}
 			run = new Run(this, key, ExportAreas.plan(list));
+			showProgress();
 			run.exportArea();
 		}
 
 		/** Adds a line to the final report. */
 		void line(Component text) {
-			report.append("\n").append(text);
+			report.append(Chat.line(text));
 		}
 
 		private void finish() {
@@ -263,13 +282,17 @@ public final class XaeroExport {
 			MutableComponent message;
 			if (anyImages) {
 				Blaze3D.openPath(root);
-				message = Component.literal("Export cleaned and ready to upload: " + root
-						+ " (one folder per dimension; upload each to its own map).").withStyle(ChatFormatting.GREEN);
+				message = Chat.success("Export cleaned and ready to upload: map exports/" + root.getFileName()
+						+ ". Upload each dimension's folder to its own map.");
+				buttons.addFirst(Chat.openButton("Open folder", root));
+				message.append(report).append(Chat.buttons(buttons.toArray(Component[]::new)));
+				Chat.status(client, "export done, see chat.", ChatFormatting.GREEN);
 			} else {
 				deleteIfEmpty(root);
-				message = red("Nothing to upload.");
+				message = Chat.warning("Nothing to upload.").append(report);
+				Chat.status(client, "nothing to upload.", ChatFormatting.GOLD);
 			}
-			tell(client, message.append(report));
+			Chat.send(client, message);
 			if (whenDone != null) {
 				whenDone.run();
 			}
@@ -319,10 +342,7 @@ public final class XaeroExport {
 			}
 			job.stage(Job.Stage.EXPORTING);
 			// Xaero runs the export a moment later, so this gets drawn before the game freezes.
-			if (job.client.player != null) {
-				job.client.player.sendOverlayMessage(Component.literal("Exporting " + shortName(key) + ": area "
-						+ (index + 1) + " of " + areas.size() + "…"));
-			}
+			job.showProgress();
 		}
 
 		/**
@@ -461,16 +481,14 @@ public final class XaeroExport {
 				}
 			}
 			int number = AomcVisitedClient.VISITED.rememberExport(key, exported, job.writesAtStart);
-			Component button = Component.literal("[Mark as uploaded]").withStyle(style -> style
-					.withColor(ChatFormatting.AQUA)
-					.withUnderlined(true)
-					.withClickEvent(new ClickEvent.RunCommand("/visited uploaded " + number))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click once " + folderName(key)
-							+ " has been uploaded: forgets what it contained, so the next export only has ground"
-							+ " mapped since."))));
-			job.line(Component.literal(folderName(key) + "/: kept " + total.chunksKept() + " chunks ("
-					+ changed + " new or changed), blacked out " + total.chunksBlackedOut() + " of older map, "
-					+ left + " images. ").withStyle(ChatFormatting.GREEN).append(button));
+			job.buttons.add(Chat.button("Mark " + shortName(key) + " as uploaded", ChatFormatting.GREEN,
+					"/visited uploaded " + number, "Click once " + folderName(key) + "/ has been uploaded: forgets"
+							+ " what it contained, so the next export only has ground mapped since. Works after a"
+							+ " restart too."));
+			job.line(Component.literal(folderName(key) + "/: " + total.chunksKept() + " chunks (" + changed
+					+ " new or changed), " + left + (left == 1 ? " image" : " images")
+					+ (total.chunksBlackedOut() > 0 ? ", " + total.chunksBlackedOut() + " older chunks blacked out" : "")
+					+ "."));
 			job.nextDimension();
 		}
 
@@ -503,13 +521,6 @@ public final class XaeroExport {
 			} catch (IOException e) {
 				// Not empty, or gone: leave it.
 			}
-		}
-	}
-
-	private static void tell(Minecraft client, Component message) {
-		AomcVisitedClient.LOGGER.info(message.getString());
-		if (client.player != null) {
-			client.player.sendSystemMessage(message);
 		}
 	}
 

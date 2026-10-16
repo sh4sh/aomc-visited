@@ -11,9 +11,8 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.packs.repository.PackRepository;
 import net.minecraft.world.level.Level;
@@ -96,15 +95,16 @@ public class AomcVisitedClient implements ClientModInitializer {
 	private static int showCounts(FabricClientCommandSource source) {
 		String server = VISITED.server();
 		if (server == null) {
-			source.sendError(Component.literal("Not connected to a world."));
+			source.sendFeedback(Chat.error("Not connected to a world."));
 			return 0;
 		}
 		Map<String, Integer> counts = VISITED.counts();
-		source.sendFeedback(Component.literal("Visited chunks on " + server + ":"));
+		MutableComponent message = Chat.info("Chunks recorded on " + server + ":");
 		if (counts.isEmpty()) {
-			source.sendFeedback(Component.literal("  none yet"));
+			message.append(Chat.line("none yet"));
 		}
-		counts.forEach((key, count) -> source.sendFeedback(Component.literal("  " + key + ": " + count)));
+		counts.forEach((key, count) -> message.append(Chat.line(key + ": " + count)));
+		source.sendFeedback(message);
 		return 1;
 	}
 
@@ -115,27 +115,24 @@ public class AomcVisitedClient implements ClientModInitializer {
 	 */
 	private static int clear(FabricClientCommandSource source, boolean confirm) {
 		if (VISITED.server() == null || source.getClient().level == null) {
-			source.sendError(Component.literal("Not connected to a world."));
+			source.sendFeedback(Chat.error("Not connected to a world."));
 			return 0;
 		}
 		ResourceKey<Level> dimension = source.getClient().level.dimension();
 		String id = dimension.identifier().toString();
 		if (!confirm) {
-			Component button = Component.literal("[Confirm]").withStyle(style -> style
-					.withColor(ChatFormatting.RED)
-					.withUnderlined(true)
-					.withClickEvent(new ClickEvent.RunCommand("/visited clear confirm"))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Forget the record for " + id))));
-			source.sendFeedback(Component.literal("This will forget the " + VISITED.count(dimension) + " chunks"
-					+ " recorded in " + id + ", so the next export starts from scratch. ").append(button));
+			source.sendFeedback(Chat.warning("This will forget the " + VISITED.count(dimension) + " chunks"
+					+ " recorded in " + id + ", so the next export starts from scratch.")
+					.append(Chat.buttons(Chat.button("Confirm", ChatFormatting.RED, "/visited clear confirm",
+							"Forget the record for " + id))));
 			return 1;
 		}
 		int forgotten = VISITED.clear(dimension);
 		if (xaeroInstalled()) {
 			VisitedHighlighter.refreshAll();
 		}
-		source.sendFeedback(Component.literal("Forgot " + forgotten + " chunks recorded in " + id + ". Zoomed-out"
-				+ " world map views may show the old tint until you zoom in on them once."));
+		source.sendFeedback(Chat.success("Forgot " + forgotten + " chunks recorded in " + id + ".")
+				.append(Chat.line("Zoomed-out world map views may show the old tint until you zoom in on them once.")));
 		return 1;
 	}
 
@@ -145,21 +142,21 @@ public class AomcVisitedClient implements ClientModInitializer {
 	 */
 	private static int markUploaded(FabricClientCommandSource source, int export) {
 		if (export < 0) {
-			source.sendError(Component.literal("There's no export from this session to mark as uploaded. To start"
-					+ " over, use /visited clear."));
+			source.sendFeedback(Chat.error("There's no export to mark as uploaded. To start over, use /visited"
+					+ " clear."));
 			return 0;
 		}
 		int forgotten = VISITED.markUploaded(export);
 		if (forgotten < 0) {
-			source.sendError(Component.literal("That export was already marked as uploaded, or is from before the"
-					+ " game was restarted. To start over, use /visited clear."));
+			source.sendFeedback(Chat.error("That export was already marked as uploaded, or its record was cleared"
+					+ " since. To start over, use /visited clear."));
 			return 0;
 		}
 		if (xaeroInstalled()) {
 			VisitedHighlighter.refreshAll();
 		}
-		source.sendFeedback(Component.literal("Marked as uploaded: forgot " + forgotten + " chunks. Anything"
-				+ " mapped since that export is kept for the next one."));
+		source.sendFeedback(Chat.success("Marked as uploaded: forgot " + forgotten + " chunks.")
+				.append(Chat.line("Anything mapped since that export is kept for the next one.")));
 		return 1;
 	}
 
@@ -169,7 +166,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		if (xaeroInstalled()) {
 			VisitedHighlighter.refreshAll();
 		}
-		source.sendFeedback(Component.literal(show
+		source.sendFeedback(Chat.info(show
 				? "Showing what the next export will keep on Xaero's World Map. Hide it with /visited show off."
 				: "No longer showing the record on Xaero's World Map. Show it again with /visited show on."));
 		return 1;
@@ -182,7 +179,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 	 */
 	private int requestExport(FabricClientCommandSource source, boolean anyway) {
 		if (!xaeroInstalled()) {
-			source.sendError(Component.literal("Exporting needs Xaero's World Map."));
+			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
 		}
 		// The player's own packs have ids like "file/<name>"; built-in and mod packs don't. Pack names can
@@ -191,20 +188,14 @@ public class AomcVisitedClient implements ClientModInitializer {
 				.filter(id -> id.startsWith("file/"))
 				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
 		if (!packs.isEmpty() && !anyway) {
-			Component turnOff = Component.literal("[Turn packs off for the export]").withStyle(style -> style
-					.withColor(ChatFormatting.GREEN)
-					.withUnderlined(true)
-					.withClickEvent(new ClickEvent.RunCommand("/visited export without-packs"))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Turns your resource packs off, exports,"
-							+ " then turns them back on in the same order. Reloads resources twice."))));
-			Component anywayButton = Component.literal("[Export anyway]").withStyle(style -> style
-					.withColor(ChatFormatting.RED)
-					.withUnderlined(true)
-					.withClickEvent(new ClickEvent.RunCommand("/visited export anyway"))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Export with the resource packs on"))));
-			source.sendFeedback(Component.literal("Resource packs change the colours of the exported map ("
-					+ String.join(", ", packs) + "). Turn them off in Options > Resource Packs, or: ")
-					.withStyle(ChatFormatting.GOLD).append(turnOff).append(" ").append(anywayButton));
+			source.sendFeedback(Chat.warning("Resource packs change the colours of the exported map. These are on:")
+					.append(Chat.line(String.join(", ", packs)))
+					.append(Chat.buttons(
+							Chat.button("Turn packs off for the export", ChatFormatting.GREEN, "/visited export without-packs",
+									"Turns your resource packs off, exports, then turns them back on in the same"
+											+ " order. Reloads resources twice."),
+							Chat.button("Export anyway", ChatFormatting.RED, "/visited export anyway",
+									"Export with the resource packs on: the colours on the webmap will be off"))));
 			return 0;
 		}
 		exportNextTick = true;
@@ -219,11 +210,11 @@ public class AomcVisitedClient implements ClientModInitializer {
 	 */
 	private static int exportWithoutPacks(FabricClientCommandSource source) {
 		if (!xaeroInstalled()) {
-			source.sendError(Component.literal("Exporting needs Xaero's World Map."));
+			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
 		}
 		if (XaeroExport.active()) {
-			source.sendError(Component.literal("An export is already running."));
+			source.sendFeedback(Chat.error("An export is already running."));
 			return 0;
 		}
 		Minecraft client = source.getClient();
@@ -231,8 +222,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 		// In order: the list's order is the packs' priority, and Minecraft keeps the order it's given.
 		List<String> original = List.copyOf(repository.getSelectedIds());
 		repository.setSelected(original.stream().filter(id -> !id.startsWith("file/")).toList());
-		source.sendFeedback(Component.literal("Turning your resource packs off for the export. They'll come back"
-				+ " on afterwards, in the same order."));
+		source.sendFeedback(Chat.info("Turning your resource packs off for the export. They'll come back on"
+				+ " afterwards, in the same order."));
 		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
 			Component error = XaeroExport.start(client, () -> restorePacks(client, original));
 			if (error != null) {
@@ -254,12 +245,10 @@ public class AomcVisitedClient implements ClientModInitializer {
 				LOGGER.warn("Resource packs restored in a different order: {} instead of {}",
 						repository.getSelectedIds(), original);
 			}
-			if (client.player != null) {
-				client.player.sendSystemMessage(sameOrder
-						? Component.literal("Your resource packs are back on.")
-						: Component.literal("Your resource packs are back on, but their order may have changed:"
-								+ " please check Options > Resource Packs.").withStyle(ChatFormatting.GOLD));
-			}
+			Chat.send(client, sameOrder
+					? Chat.success("Your resource packs are back on.")
+					: Chat.warning("Your resource packs are back on, but their order may have changed: please check"
+							+ " Options > Resource Packs."));
 		}));
 	}
 
