@@ -93,6 +93,13 @@ public final class VisitedChunks {
 	 */
 	private static final String FORGOTTEN = "forgotten";
 	public static final long KEEP_FORGOTTEN_MS = 24 * 60 * 60 * 1000L;
+	/**
+	 * Exists while the player is on the server; deleted when they leave or the game stops normally. Found on
+	 * joining, it means the game crashed last time: then nothing up to {@link #KEEP_FORGOTTEN_MS} old is
+	 * forgotten, since a crash loop can easily last an hour (sh4sh, October 2026).
+	 */
+	private static final String PLAYING_MARKER = "playing";
+	private boolean crashedLastTime;
 
 	/** A record from an earlier session: its key, chunk count, and when it was last saved. */
 	public record Earlier(String key, int chunks, long savedMillis) {
@@ -180,9 +187,15 @@ public final class VisitedChunks {
 		close();
 		server = serverKey;
 		Path dir = root.resolve(server);
-		if (!Files.isDirectory(dir)) {
-			return;
+		Path marker = dir.resolve(PLAYING_MARKER);
+		crashedLastTime = Files.exists(marker);
+		try {
+			Files.createDirectories(dir);
+			Files.writeString(marker, "AOMC Visited: the player is on this server, or the game didn't close normally.\n");
+		} catch (IOException e) {
+			AomcVisitedClient.LOGGER.error("Could not write {}", marker, e);
 		}
+		long forgetAfter = crashedLastTime ? KEEP_FORGOTTEN_MS : FORGET_AFTER_MS;
 		loadExports(dir.resolve("exports.txt"));
 		List<Earlier> found = new java.util.ArrayList<>(), tooOld = new java.util.ArrayList<>();
 		long now = System.currentTimeMillis();
@@ -196,7 +209,7 @@ public final class VisitedChunks {
 				load(file, chunks, changedChunks);
 				long saved = Files.getLastModifiedTime(file).toMillis();
 				Earlier record = new Earlier(key, chunks.size(), saved);
-				if (now - saved > FORGET_AFTER_MS) {
+				if (now - saved > forgetAfter) {
 					// Kept a while in case the player wants it back (see restoreForgotten); moving keeps the
 					// file's time, which says when it was last mapped.
 					Path kept = forgottenFile(key);
@@ -262,6 +275,11 @@ public final class VisitedChunks {
 		return restored;
 	}
 
+	/** Whether the game didn't close normally the last time the player was on this server. */
+	public synchronized boolean crashedLastTime() {
+		return crashedLastTime;
+	}
+
 	/** The records forgotten when joining for being older than {@link #FORGET_AFTER_MS}. */
 	public synchronized List<Earlier> expired() {
 		return expired;
@@ -278,6 +296,14 @@ public final class VisitedChunks {
 	/** Saves and forgets the current server's record. */
 	public synchronized void close() {
 		save();
+		if (server != null) {
+			try {
+				Files.deleteIfExists(root.resolve(server).resolve(PLAYING_MARKER));
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not delete the {} marker", PLAYING_MARKER, e);
+			}
+		}
+		crashedLastTime = false;
 		server = null;
 		records.clear();
 		changed.clear();

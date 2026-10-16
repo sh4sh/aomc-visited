@@ -26,8 +26,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 	public static final String MOD_ID = "aomc_visited";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-	/** Save every 5 minutes while playing, so a crash loses little. */
-	private static final int AUTOSAVE_TICKS = 5 * 60 * 20;
+	/** Save every minute while playing, so a crash loses little (only records that changed are written). */
+	private static final int AUTOSAVE_TICKS = 60 * 20;
 
 	public static final VisitedChunks VISITED =
 			new VisitedChunks(FabricLoader.getInstance().getGameDir().resolve(MOD_ID));
@@ -179,7 +179,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 		if (earlier.isEmpty()) {
 			return;
 		}
-		MutableComponent message = Chat.info("You have map data from an earlier session that isn't uploaded yet:");
+		MutableComponent message = Chat.info(VISITED.crashedLastTime()
+				? "Your game didn't close normally last time, so your map data was kept:"
+				: "You have map data from an earlier session that isn't uploaded yet:");
 		for (VisitedChunks.Earlier record : earlier) {
 			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
 					+ ago(now - record.savedMillis())));
