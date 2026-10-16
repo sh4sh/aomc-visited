@@ -16,6 +16,9 @@
 	"mixins": [
 		"aomc_visited.mixins.json"
 	],
+	"suggests": {
+		"xaeroworldmap": "*"
+	},
 	"depends": {
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",

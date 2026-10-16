@@ -4,11 +4,40 @@ plugins {
 
 // Client-only mod, so a single source set: no splitEnvironmentSourceSets().
 
+loom {
+	runs {
+		client {
+			// macOS only lets the first thread open windows; Mojang's launcher passes this flag
+			// for 26.3, but runClient didn't, and the game died with SIGTRAP at window setup.
+			if (System.getProperty("os.name").toLowerCase().contains("mac")) {
+				vmArg "-XstartOnFirstThread"
+			}
+		}
+	}
+}
+
+def xaeroWorldMapJar = file(providers.gradleProperty("xaero_worldmap_jar")
+		.getOrElse("${System.getProperty('user.home')}/xaeroworldmap-fabric-${project.minecraft_version}-${project.xaero_worldmap_version}.jar"))
+
+def extractXaeroLib = tasks.register("extractXaeroLib", Sync) {
+	from(zipTree(xaeroWorldMapJar)) {
+		include "META-INF/jars/xaerolib-*.jar"
+		eachFile { path = "xaerolib.jar" }
+	}
+	includeEmptyDirs = false
+	into layout.buildDirectory.dir("xaero-lib")
+}
+
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Xaero's World Map is All Rights Reserved: compile against a local copy (never commit or publish
+	// it), and only call into it when it's installed. Its xaerolib is nested inside the jar.
+	compileOnly files(xaeroWorldMapJar)
+	compileOnly files(layout.buildDirectory.file("xaero-lib/xaerolib.jar")).builtBy(extractXaeroLib)
 }
 
 processResources {

@@ -24,6 +24,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 			new VisitedChunks(FabricLoader.getInstance().getGameDir().resolve(MOD_ID));
 
 	private int ticksSinceSave;
+	/** The export screen opens a tick after the command, since the chat screen closes after running it. */
+	private VisitedChunks.Snapshot exportNextTick;
 
 	@Override
 	public void onInitializeClient() {
@@ -34,6 +36,13 @@ public class AomcVisitedClient implements ClientModInitializer {
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			VISITED.tick();
+			if (exportNextTick != null) {
+				Component error = XaeroExport.open(client, exportNextTick);
+				exportNextTick = null;
+				if (error != null) {
+					client.player.sendSystemMessage(error);
+				}
+			}
 			if (++ticksSinceSave >= AUTOSAVE_TICKS) {
 				ticksSinceSave = 0;
 				VISITED.save();
@@ -41,7 +50,19 @@ public class AomcVisitedClient implements ClientModInitializer {
 		});
 
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) ->
-				dispatcher.register(ClientCommands.literal("visited").executes(context -> {
+				dispatcher.register(ClientCommands.literal("visited").then(ClientCommands.literal("export").executes(context -> {
+					if (!FabricLoader.getInstance().isModLoaded("xaeroworldmap")) {
+						context.getSource().sendError(Component.literal("Exporting needs Xaero's World Map."));
+						return 0;
+					}
+					VisitedChunks.Snapshot snapshot = VISITED.snapshot();
+					if (snapshot == null || snapshot.chunks().isEmpty()) {
+						context.getSource().sendError(Component.literal("Nothing recorded in this dimension yet."));
+						return 0;
+					}
+					exportNextTick = snapshot;
+					return 1;
+				})).executes(context -> {
 					String server = VISITED.server();
 					if (server == null) {
 						context.getSource().sendError(Component.literal("Not connected to a world."));

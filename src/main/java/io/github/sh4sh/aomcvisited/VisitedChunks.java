@@ -189,6 +189,20 @@ public final class VisitedChunks {
 		return server;
 	}
 
+	/** The current dimension and a copy of its recorded chunks. */
+	public record Snapshot(String dimension, LongOpenHashSet chunks) {
+	}
+
+	/** The current dimension's record, or null before the first chunk arrives. */
+	public synchronized Snapshot snapshot() {
+		if (loadedLevel == null) {
+			return null;
+		}
+		String dim = loadedLevel.dimension().identifier().toString();
+		LongOpenHashSet chunks = byDimension.get(dim);
+		return new Snapshot(dim, chunks == null ? new LongOpenHashSet() : new LongOpenHashSet(chunks));
+	}
+
 	/** Chunk counts per dimension for the current server. */
 	public synchronized Map<String, Integer> counts() {
 		Map<String, Integer> counts = new TreeMap<>();
