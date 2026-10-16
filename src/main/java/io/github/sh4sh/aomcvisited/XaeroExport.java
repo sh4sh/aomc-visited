@@ -30,8 +30,8 @@ final class XaeroExport {
 
 	/**
 	 * Opens Xaero's export screen with the bounding box of the chunks Xaero wrote this session selected, for
-	 * the dimension and layer its map is showing (that's what it exports). Once the export succeeds, blacks
-	 * out everything else. Returns an error for the player, or null.
+	 * the dimension its map is showing (that's what it exports), with cave mode off. Once the export
+	 * succeeds, blacks out everything else. Returns an error for the player, or null.
 	 */
 	static Component open(Minecraft client) {
 		WorldMapSession session = WorldMapSession.getCurrentSession();
@@ -41,7 +41,13 @@ final class XaeroExport {
 		if (shown == null) {
 			return Component.literal("Xaero's World Map isn't ready yet. Open the world map once, then try again.");
 		}
-		String key = VisitedChunks.recordKey(shown.getDimId(), processor.getCurrentCaveLayer());
+		// The webmap's main maps (including the Nether, mapped on the roof) are made with cave mode off; cave
+		// mode is a separate webmap map that we don't support yet.
+		if (processor.getCurrentCaveLayer() != VisitedChunks.SURFACE_LAYER) {
+			return Component.literal("Xaero's World Map is in cave mode. Turn cave mode off on the world map,"
+					+ " then run /visited export again.");
+		}
+		String key = VisitedChunks.recordKey(shown.getDimId(), VisitedChunks.SURFACE_LAYER);
 		LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
 		if (chunks.isEmpty()) {
 			return Component.literal("Nothing recorded for " + key + " yet. If Xaero has been mapping and this"
