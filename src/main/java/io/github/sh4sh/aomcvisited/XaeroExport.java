@@ -87,9 +87,13 @@ public final class XaeroExport {
 		return job != null && System.currentTimeMillis() - lastProgress < STUCK_MS;
 	}
 
-	/** Forgets the job when leaving the world (normally there is none). */
+	/** Forgets the job when leaving the world (normally there is none), still running its "when done". */
 	static void reset() {
+		Job current = job;
 		job = null;
+		if (current != null && current.whenDone != null) {
+			current.whenDone.run();
+		}
 	}
 
 	/** Called by {@code XaeroExportTaskMixin} when Xaero's export task has returned. */
@@ -105,8 +109,11 @@ public final class XaeroExport {
 		}
 	}
 
-	/** Starts exporting every dimension with recorded ground. Returns an error for the player, or null. */
-	static Component start(Minecraft client) {
+	/**
+	 * Starts exporting every dimension with recorded ground. Returns an error for the player, or null if it
+	 * started; then {@code whenDone} (may be null) runs once the export has finished or failed.
+	 */
+	static Component start(Minecraft client, Runnable whenDone) {
 		if (active()) {
 			return red("An export is already running.");
 		}
@@ -123,7 +130,7 @@ public final class XaeroExport {
 		List<String> names = keys.stream().map(XaeroExport::shortName).toList();
 		tell(client, Component.literal("Exporting " + String.join(", ", names) + ". Xaero's map switches"
 				+ " dimension while it works, and the game freezes for a few seconds per area."));
-		job = new Job(client, processor, keys);
+		job = new Job(client, processor, keys, whenDone);
 		lastProgress = System.currentTimeMillis();
 		job.startDimension();
 		return null;
@@ -136,6 +143,7 @@ public final class XaeroExport {
 		private final Minecraft client;
 		private final MapProcessor processor;
 		private final List<String> keys;
+		private final Runnable whenDone;
 		/** What Xaero's map was showing before; restored at the end. */
 		private final ResourceKey<Level> previousCustom;
 		/** Xaero's write count at the start: chunks written later are kept by "mark as uploaded". */
@@ -149,10 +157,11 @@ public final class XaeroExport {
 		private ResourceKey<Level> target;
 		private Run run;
 
-		Job(Minecraft client, MapProcessor processor, List<String> keys) {
+		Job(Minecraft client, MapProcessor processor, List<String> keys, Runnable whenDone) {
 			this.client = client;
 			this.processor = processor;
 			this.keys = keys;
+			this.whenDone = whenDone;
 			this.previousCustom = processor.getMapWorld().getCustomDimensionId();
 		}
 
@@ -261,6 +270,9 @@ public final class XaeroExport {
 				message = red("Nothing to upload.");
 			}
 			tell(client, message.append(report));
+			if (whenDone != null) {
+				whenDone.run();
+			}
 		}
 	}
 

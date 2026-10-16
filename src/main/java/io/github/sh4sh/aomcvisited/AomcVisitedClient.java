@@ -15,6 +15,7 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.packs.repository.PackRepository;
 import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,7 +55,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 						.executes(context -> showCounts(context.getSource()))
 						.then(ClientCommands.literal("export")
 								.executes(context -> requestExport(context.getSource(), false))
-								.then(ClientCommands.literal("anyway").executes(context -> requestExport(context.getSource(), true))))
+								.then(ClientCommands.literal("anyway").executes(context -> requestExport(context.getSource(), true)))
+								.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource()))))
 						.then(ClientCommands.literal("clear")
 								.executes(context -> clear(context.getSource(), false))
 								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true))))
@@ -79,7 +81,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		if (exportNextTick) {
 			exportNextTick = false;
-			Component error = XaeroExport.start(client);
+			Component error = XaeroExport.start(client, null);
 			if (error != null && client.player != null) {
 				client.player.sendSystemMessage(error);
 			}
@@ -189,18 +191,76 @@ public class AomcVisitedClient implements ClientModInitializer {
 				.filter(id -> id.startsWith("file/"))
 				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
 		if (!packs.isEmpty() && !anyway) {
-			Component button = Component.literal("[Export anyway]").withStyle(style -> style
+			Component turnOff = Component.literal("[Turn packs off for the export]").withStyle(style -> style
+					.withColor(ChatFormatting.GREEN)
+					.withUnderlined(true)
+					.withClickEvent(new ClickEvent.RunCommand("/visited export without-packs"))
+					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Turns your resource packs off, exports,"
+							+ " then turns them back on in the same order. Reloads resources twice."))));
+			Component anywayButton = Component.literal("[Export anyway]").withStyle(style -> style
 					.withColor(ChatFormatting.RED)
 					.withUnderlined(true)
 					.withClickEvent(new ClickEvent.RunCommand("/visited export anyway"))
 					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Export with the resource packs on"))));
 			source.sendFeedback(Component.literal("Resource packs change the colours of the exported map ("
-					+ String.join(", ", packs) + "). Turn them off in Options > Resource Packs, then run /visited"
-					+ " export again. ").withStyle(ChatFormatting.GOLD).append(button));
+					+ String.join(", ", packs) + "). Turn them off in Options > Resource Packs, or: ")
+					.withStyle(ChatFormatting.GOLD).append(turnOff).append(" ").append(anywayButton));
 			return 0;
 		}
 		exportNextTick = true;
 		return 1;
+	}
+
+	/**
+	 * {@code /visited export without-packs}: turns the player's own resource packs off, reloads, exports, then
+	 * turns them back on in the same order and reloads again. Minecraft's settings aren't saved meanwhile,
+	 * so if the game stops mid-way the packs are simply on again next launch. Xaero recalculates its block
+	 * colours after a reload (it clears its colour cache when the textures are re-stitched).
+	 */
+	private static int exportWithoutPacks(FabricClientCommandSource source) {
+		if (!xaeroInstalled()) {
+			source.sendError(Component.literal("Exporting needs Xaero's World Map."));
+			return 0;
+		}
+		if (XaeroExport.active()) {
+			source.sendError(Component.literal("An export is already running."));
+			return 0;
+		}
+		Minecraft client = source.getClient();
+		PackRepository repository = client.getResourcePackRepository();
+		// In order: the list's order is the packs' priority, and Minecraft keeps the order it's given.
+		List<String> original = List.copyOf(repository.getSelectedIds());
+		repository.setSelected(original.stream().filter(id -> !id.startsWith("file/")).toList());
+		source.sendFeedback(Component.literal("Turning your resource packs off for the export. They'll come back"
+				+ " on afterwards, in the same order."));
+		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
+			Component error = XaeroExport.start(client, () -> restorePacks(client, original));
+			if (error != null) {
+				if (client.player != null) {
+					client.player.sendSystemMessage(error);
+				}
+				restorePacks(client, original);
+			}
+		}));
+		return 1;
+	}
+
+	private static void restorePacks(Minecraft client, List<String> original) {
+		PackRepository repository = client.getResourcePackRepository();
+		repository.setSelected(original);
+		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
+			boolean sameOrder = List.copyOf(repository.getSelectedIds()).equals(original);
+			if (!sameOrder) {
+				LOGGER.warn("Resource packs restored in a different order: {} instead of {}",
+						repository.getSelectedIds(), original);
+			}
+			if (client.player != null) {
+				client.player.sendSystemMessage(sameOrder
+						? Component.literal("Your resource packs are back on.")
+						: Component.literal("Your resource packs are back on, but their order may have changed:"
+								+ " please check Options > Resource Packs.").withStyle(ChatFormatting.GOLD));
+			}
+		}));
 	}
 
 	/** Classes that use Xaero ({@link XaeroExport}, {@link VisitedHighlighter}) may only load when this is true. */
