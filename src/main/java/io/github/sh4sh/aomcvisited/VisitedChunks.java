@@ -87,6 +87,12 @@ public final class VisitedChunks {
 	 * (sh4sh, October 2026).
 	 */
 	public static final long FORGET_AFTER_MS = 60 * 60 * 1000L;
+	/**
+	 * Forgotten records are kept in this folder (under the server's), so the player can restore them, until
+	 * this long after they were last mapped (sh4sh, October 2026).
+	 */
+	private static final String FORGOTTEN = "forgotten";
+	public static final long KEEP_FORGOTTEN_MS = 24 * 60 * 60 * 1000L;
 
 	/** A record from an earlier session: its key, chunk count, and when it was last saved. */
 	public record Earlier(String key, int chunks, long savedMillis) {
@@ -180,20 +186,22 @@ public final class VisitedChunks {
 		loadExports(dir.resolve("exports.txt"));
 		List<Earlier> found = new java.util.ArrayList<>(), tooOld = new java.util.ArrayList<>();
 		long now = System.currentTimeMillis();
-		try (Stream<Path> files = Files.walk(dir)) {
-			for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".txt"))::iterator) {
-				Path rel = dir.relativize(file);
-				if (rel.getNameCount() < 2) {
-					continue;
-				}
-				String path = rel.subpath(1, rel.getNameCount()).toString().replace('\\', '/');
-				String key = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
+		for (Path file : recordFiles(dir)) {
+			String key = keyFor(dir, file);
+			if (key == null || key.startsWith(FORGOTTEN + ":")) {
+				continue;
+			}
+			try {
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
 				long saved = Files.getLastModifiedTime(file).toMillis();
 				Earlier record = new Earlier(key, chunks.size(), saved);
 				if (now - saved > FORGET_AFTER_MS) {
-					Files.delete(file);
+					// Kept a while in case the player wants it back (see restoreForgotten); moving keeps the
+					// file's time, which says when it was last mapped.
+					Path kept = forgottenFile(key);
+					Files.createDirectories(kept.getParent());
+					Files.move(file, kept, StandardCopyOption.REPLACE_EXISTING);
 					if (!key.contains("/") && !chunks.isEmpty()) {
 						tooOld.add(record);
 					}
@@ -202,19 +210,12 @@ public final class VisitedChunks {
 				if (!key.contains("/") && !chunks.isEmpty()) {
 					found.add(record);
 				}
-				records.put(key, chunks);
-				changed.put(key, changedChunks);
-				Long2IntOpenHashMap counts = new Long2IntOpenHashMap();
-				for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
-					long pos = it.nextLong();
-					counts.addTo(ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5), 1);
-				}
-				regionCounts.put(key, counts);
-				regionVersions.put(key, new Long2IntOpenHashMap(counts));
+				addRecord(key, chunks, changedChunks);
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", file, e);
 			}
-		} catch (IOException e) {
-			AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", dir, e);
 		}
+		deleteForgotten(key -> true, now - KEEP_FORGOTTEN_MS);
 		found.sort(java.util.Comparator.comparing(Earlier::key));
 		tooOld.sort(java.util.Comparator.comparing(Earlier::key));
 		earlier = List.copyOf(found);
@@ -223,6 +224,42 @@ public final class VisitedChunks {
 			exportsDirty = true;
 			saveExports();
 		}
+	}
+
+	/**
+	 * Puts back the records forgotten for being old, if they were last mapped less than
+	 * {@link #KEEP_FORGOTTEN_MS} ago, adding them to whatever was mapped since. Returns how many chunks
+	 * were added, or -1 when not connected.
+	 */
+	public synchronized int restoreForgotten() {
+		if (server == null) {
+			return -1;
+		}
+		Path dir = root.resolve(server).resolve(FORGOTTEN);
+		long now = System.currentTimeMillis();
+		int restored = 0;
+		for (Path file : recordFiles(dir)) {
+			String key = keyFor(dir, file);
+			if (key == null) {
+				continue;
+			}
+			try {
+				if (now - Files.getLastModifiedTime(file).toMillis() <= KEEP_FORGOTTEN_MS) {
+					LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
+					load(file, chunks, changedChunks);
+					int before = records.containsKey(key) ? records.get(key).size() : 0;
+					addRecord(key, chunks, changedChunks);
+					restored += records.get(key).size() - before;
+					dirty.add(key);
+				}
+				Files.delete(file);
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not restore visited chunks from {}", file, e);
+			}
+		}
+		expired = List.of();
+		save();
+		return restored;
 	}
 
 	/** The records forgotten when joining for being older than {@link #FORGET_AFTER_MS}. */
@@ -299,6 +336,9 @@ public final class VisitedChunks {
 
 	private int clear(String id) {
 		int forgotten = 0;
+		if (server != null) {
+			deleteForgotten(key -> key.equals(id) || key.startsWith(id + "/"), Long.MAX_VALUE);
+		}
 		if (exports.values().removeIf(export -> export.key().equals(id) || export.key().startsWith(id + "/"))) {
 			exportsDirty = true;
 		}
@@ -512,6 +552,70 @@ public final class VisitedChunks {
 		} catch (IOException e) {
 			AomcVisitedClient.LOGGER.error("Could not read the exports from {}", file, e);
 		}
+	}
+
+	/** Adds chunks to a record (creating it if needed), keeping the counts for the map highlight up to date. */
+	private void addRecord(String key, LongOpenHashSet chunks, LongOpenHashSet changedChunks) {
+		LongOpenHashSet recorded = records.computeIfAbsent(key, k -> new LongOpenHashSet());
+		LongOpenHashSet recordedChanged = changed.computeIfAbsent(key, k -> new LongOpenHashSet());
+		Long2IntOpenHashMap counts = regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
+		Long2IntOpenHashMap versions = regionVersions.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
+		for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
+			long pos = it.nextLong();
+			boolean added = recorded.add(pos);
+			boolean nowChanged = changedChunks.contains(pos) && recordedChanged.add(pos);
+			if (added || nowChanged) {
+				long region = ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5);
+				if (added) {
+					counts.addTo(region, 1);
+				}
+				versions.addTo(region, 1);
+			}
+		}
+	}
+
+	/** Every record file under {@code dir}, listed up front so files can be moved meanwhile. */
+	private static List<Path> recordFiles(Path dir) {
+		if (!Files.isDirectory(dir)) {
+			return List.of();
+		}
+		try (Stream<Path> files = Files.walk(dir)) {
+			return files.filter(p -> p.toString().endsWith(".txt")).toList();
+		} catch (IOException e) {
+			AomcVisitedClient.LOGGER.error("Could not list visited chunks in {}", dir, e);
+			return List.of();
+		}
+	}
+
+	/** {@code <dir>/minecraft/overworld/cave_5.txt} -> {@code minecraft:overworld/cave_5}; null for other files. */
+	private static String keyFor(Path dir, Path file) {
+		Path rel = dir.relativize(file);
+		if (rel.getNameCount() < 2) {
+			return null;
+		}
+		String path = rel.subpath(1, rel.getNameCount()).toString().replace('\\', '/');
+		return rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
+	}
+
+	/** Deletes the forgotten records whose key matches, if last mapped before {@code before}. */
+	private void deleteForgotten(java.util.function.Predicate<String> matches, long before) {
+		Path dir = root.resolve(server).resolve(FORGOTTEN);
+		for (Path file : recordFiles(dir)) {
+			String key = keyFor(dir, file);
+			try {
+				if (key != null && matches.test(key) && Files.getLastModifiedTime(file).toMillis() < before) {
+					Files.delete(file);
+				}
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not delete {}", file, e);
+			}
+		}
+	}
+
+	private Path forgottenFile(String key) {
+		int colon = key.indexOf(':');
+		return root.resolve(server).resolve(FORGOTTEN).resolve(key.substring(0, colon))
+				.resolve(key.substring(colon + 1) + ".txt");
 	}
 
 	/** {@code minecraft:overworld/cave_5} is stored as {@code minecraft/overworld/cave_5.txt}. */

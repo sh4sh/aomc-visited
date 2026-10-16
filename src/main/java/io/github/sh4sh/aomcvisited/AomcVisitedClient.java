@@ -70,6 +70,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.then(ClientCommands.literal("all")
 										.executes(context -> clearAll(context.getSource(), false))
 										.then(ClientCommands.literal("confirm").executes(context -> clearAll(context.getSource(), true)))))
+						.then(ClientCommands.literal("restore").executes(context -> restore(context.getSource())))
 						.then(ClientCommands.literal("uploaded")
 								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
@@ -170,7 +171,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
 						+ ago(now - record.savedMillis())));
 			}
-			Chat.send(client, message);
+			Chat.send(client, message.append(Chat.buttons(Chat.button("Restore", ChatFormatting.GOLD,
+					"/visited restore", "May be out of date: only restore it if nobody else has mapped there since."
+							+ " Can be restored until a day after you last mapped it."))));
 		}
 		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
 		if (earlier.isEmpty()) {
@@ -204,6 +207,24 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		long days = hours / 24;
 		return days == 1 ? "a day ago" : days + " days ago";
+	}
+
+	/** {@code /visited restore}: puts back the ground forgotten on joining for being old. */
+	private static int restore(FabricClientCommandSource source) {
+		int restored = VISITED.restoreForgotten();
+		if (restored < 0) {
+			source.sendFeedback(Chat.error("Not connected to a world."));
+			return 0;
+		}
+		if (restored == 0) {
+			source.sendFeedback(Chat.info("Nothing to restore: forgotten map data is only kept for a day."));
+			return 1;
+		}
+		if (xaeroInstalled()) {
+			VisitedHighlighter.refreshAll();
+		}
+		source.sendFeedback(Chat.success("Restored " + restored + " chunks. Your next export includes them."));
+		return 1;
 	}
 
 	/** {@code /visited clear all [confirm]}: like {@link #clear}, for every dimension on this server. */
