@@ -13,13 +13,18 @@ import xaero.map.gui.MapTileSelection;
 import xaero.map.world.MapDimension;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 /**
  * Everything that touches Xaero's World Map. Only load this class when
  * {@code xaeroworldmap} is installed.
  */
 final class XaeroExport {
+	/** Xaero names each export folder after the time it was made, e.g. {@code 2026-10-15_23.52.26}. */
+	private static final Pattern EXPORT_FOLDER = Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}");
+
 	private XaeroExport() {
 	}
 
@@ -38,6 +43,8 @@ final class XaeroExport {
 		}
 		String key = VisitedChunks.recordKey(shown.getDimId(), processor.getCurrentCaveLayer());
 		LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
+		// So the record on disk matches this export (handy when checking an export by hand).
+		AomcVisitedClient.VISITED.save();
 		if (chunks.isEmpty()) {
 			return Component.literal("Nothing recorded for " + key + " yet. If Xaero has been mapping and this"
 					+ " stays empty, this version of Xaero's World Map may not be supported.");
@@ -78,8 +85,8 @@ final class XaeroExport {
 			result = TileMasker.mask(folder, (x, z) -> chunks.contains(ChunkPos.pack(x, z)));
 		} catch (IOException | RuntimeException e) {
 			AomcVisitedClient.LOGGER.error("Could not clean the export in {}", folder, e);
-			return Component.literal("Could not clean the export in " + folder + " (" + e.getMessage()
-					+ "). Don't upload it: it may contain older map data.");
+			return Component.literal("Could not clean the export (" + e.getMessage() + "). Don't upload it: it may"
+					+ " contain older map data. " + markNotCleaned(folder));
 		}
 		if (result.tiles() == 0) {
 			// With Multiple Unscaled Images off, Xaero writes one image straight into "map exports".
@@ -89,5 +96,23 @@ final class XaeroExport {
 		return Component.literal("Export cleaned and ready to upload: " + folder + "\nKept " + result.chunksKept()
 				+ " chunks you visited, blacked out " + result.chunksBlackedOut() + " chunks of older map, "
 				+ (result.tiles() - result.tilesDeleted()) + " of " + result.tiles() + " tiles left.");
+	}
+
+	/**
+	 * Renames a half-cleaned export folder so nobody uploads it by mistake. Only Xaero's timestamped tile
+	 * folders, never {@code map exports} itself. Returns where the folder is now, for the player.
+	 */
+	private static String markNotCleaned(Path folder) {
+		if (!EXPORT_FOLDER.matcher(folder.getFileName().toString()).matches()) {
+			return "It's in " + folder + ".";
+		}
+		Path marked = folder.resolveSibling(folder.getFileName() + "-NOT-CLEANED");
+		try {
+			Files.move(folder, marked);
+			return "It's been renamed to " + marked + ".";
+		} catch (IOException e) {
+			AomcVisitedClient.LOGGER.error("Could not rename {}", folder, e);
+			return "It's in " + folder + ".";
+		}
 	}
 }
