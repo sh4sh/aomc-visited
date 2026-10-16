@@ -4,6 +4,8 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import io.github.sh4sh.aomcvisited.AomcVisitedClient;
+import io.github.sh4sh.aomcvisited.VisitedChunks;
+import io.github.sh4sh.aomcvisited.VisitedHighlighter;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -31,6 +33,10 @@ public abstract class XaeroMapWriterMixin {
 			BlockStateShortShapeCache cache, MapProcessor processor, Operation<Void> original,
 			@Local(argsOnly = true) Level level) {
 		original.call(tileChunk, x, z, tile, cache, processor);
-		AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, tile.getChunkX(), tile.getChunkZ());
+		int chunkX = tile.getChunkX(), chunkZ = tile.getChunkZ();
+		if (AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, chunkX, chunkZ)
+				&& writingLayer == VisitedChunks.SURFACE_LAYER) {
+			VisitedHighlighter.refreshRegion(processor, level.dimension(), chunkX >> 5, chunkZ >> 5);
+		}
 	}
 }

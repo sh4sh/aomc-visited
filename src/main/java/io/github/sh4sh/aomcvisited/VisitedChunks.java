@@ -1,5 +1,6 @@
 package io.github.sh4sh.aomcvisited;
 
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -43,6 +45,8 @@ public final class VisitedChunks {
 	private String server;
 	/** Record key (see the class comment) to packed chunk positions. */
 	private final Map<String, LongOpenHashSet> records = new TreeMap<>();
+	/** Record key to chunk counts per 512-block region (32 x 32 chunks), for the map highlight. */
+	private final Map<String, Long2IntOpenHashMap> regionCounts = new HashMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
 	public VisitedChunks(Path root) {
@@ -55,19 +59,33 @@ public final class VisitedChunks {
 		return layer == SURFACE_LAYER ? id : id + "/cave_" + layer;
 	}
 
-	/** Called after Xaero writes fresh map data for a chunk. */
-	public synchronized void mapped(ResourceKey<Level> dimension, int layer, int x, int z) {
+	/** Called after Xaero writes fresh map data for a chunk. Returns whether the chunk is new to the record. */
+	public synchronized boolean mapped(ResourceKey<Level> dimension, int layer, int x, int z) {
 		if (server == null) {
 			Minecraft client = Minecraft.getInstance();
 			if (client.getConnection() == null) {
-				return;
+				return false;
 			}
 			open(serverKey(client));
 		}
 		String key = recordKey(dimension, layer);
-		if (records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
-			dirty.add(key);
+		if (!records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
+			return false;
 		}
+		regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(ChunkPos.pack(x >> 5, z >> 5), 1);
+		dirty.add(key);
+		return true;
+	}
+
+	public synchronized boolean contains(String key, int x, int z) {
+		LongOpenHashSet chunks = records.get(key);
+		return chunks != null && chunks.contains(ChunkPos.pack(x, z));
+	}
+
+	/** Recorded chunks in a 512-block region (region coordinates are chunk coordinates {@code >> 5}). */
+	public synchronized int regionCount(String key, int regionX, int regionZ) {
+		Long2IntOpenHashMap counts = regionCounts.get(key);
+		return counts == null ? 0 : counts.get(ChunkPos.pack(regionX, regionZ));
 	}
 
 	/** Switches to the given server's record, loading it from disk. */
@@ -89,7 +107,14 @@ public final class VisitedChunks {
 				}
 				String path = rel.subpath(1, rel.getNameCount()).toString().replace('\\', '/');
 				String key = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
-				records.put(key, load(file));
+				LongOpenHashSet chunks = load(file);
+				records.put(key, chunks);
+				Long2IntOpenHashMap counts = new Long2IntOpenHashMap();
+				for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
+					long pos = it.nextLong();
+					counts.addTo(ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5), 1);
+				}
+				regionCounts.put(key, counts);
 			}
 		} catch (IOException e) {
 			AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", dir, e);
@@ -101,6 +126,7 @@ public final class VisitedChunks {
 		save();
 		server = null;
 		records.clear();
+		regionCounts.clear();
 		dirty.clear();
 	}
 

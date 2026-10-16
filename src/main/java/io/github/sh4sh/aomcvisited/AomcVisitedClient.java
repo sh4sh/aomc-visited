@@ -24,6 +24,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 
 	public static final VisitedChunks VISITED =
 			new VisitedChunks(FabricLoader.getInstance().getGameDir().resolve(MOD_ID));
+	public static final Settings SETTINGS =
+			new Settings(FabricLoader.getInstance().getGameDir().resolve(MOD_ID).resolve("settings.properties"));
 
 	private int ticksSinceSave;
 	/** The export screen opens a tick after the command, since the chat screen closes after running it. */
@@ -38,7 +40,13 @@ public class AomcVisitedClient implements ClientModInitializer {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
 				ClientCommands.literal("visited")
 						.executes(context -> showCounts(context.getSource()))
-						.then(ClientCommands.literal("export").executes(context -> requestExport(context.getSource())))));
+						.then(ClientCommands.literal("export").executes(context -> requestExport(context.getSource())))
+						.then(ClientCommands.literal("show")
+								.then(ClientCommands.literal("on").executes(context -> setShow(context.getSource(), true)))
+								.then(ClientCommands.literal("off").executes(context -> setShow(context.getSource(), false))))));
+		if (xaeroInstalled()) {
+			VisitedHighlighter.registerEvents();
+		}
 
 		LOGGER.info("AOMC Visited loaded");
 	}
@@ -73,13 +81,30 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
+	/** {@code /visited show on|off}: the highlight on Xaero's World Map. */
+	private static int setShow(FabricClientCommandSource source, boolean show) {
+		SETTINGS.setShowOnMap(show);
+		if (xaeroInstalled()) {
+			VisitedHighlighter.refreshAll();
+		}
+		source.sendFeedback(Component.literal(show
+				? "Showing what the next export will keep on Xaero's World Map."
+				: "No longer showing the record on Xaero's World Map."));
+		return 1;
+	}
+
 	/** {@code /visited export}: opens Xaero's export screen on the next tick (see {@link #exportNextTick}). */
 	private int requestExport(FabricClientCommandSource source) {
-		if (!FabricLoader.getInstance().isModLoaded("xaeroworldmap")) {
+		if (!xaeroInstalled()) {
 			source.sendError(Component.literal("Exporting needs Xaero's World Map."));
 			return 0;
 		}
 		exportNextTick = true;
 		return 1;
+	}
+
+	/** Classes that use Xaero ({@link XaeroExport}, {@link VisitedHighlighter}) may only load when this is true. */
+	private static boolean xaeroInstalled() {
+		return FabricLoader.getInstance().isModLoaded("xaeroworldmap");
 	}
 }

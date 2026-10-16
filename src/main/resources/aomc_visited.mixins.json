@@ -4,7 +4,8 @@
 	"plugin": "io.github.sh4sh.aomcvisited.mixin.XaeroMixinPlugin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"XaeroMapWriterMixin"
+		"XaeroMapWriterMixin",
+		"XaeroWorldMapSessionMixin"
 	],
 	"injectors": {
 		"defaultRequire": 0
