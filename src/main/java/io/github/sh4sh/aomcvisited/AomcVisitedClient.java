@@ -8,8 +8,11 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
@@ -88,7 +91,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 
 	/**
 	 * {@code /visited clear [confirm]}: forgets the record for the player's dimension. Without
-	 * {@code confirm} it only says what would be cleared, since a record can't be rebuilt.
+	 * {@code confirm} it only says what would be cleared, with a [Confirm] button, since a record can't be
+	 * rebuilt. (Fabric runs client commands clicked in chat locally, like typed ones.)
 	 */
 	private static int clear(FabricClientCommandSource source, boolean confirm) {
 		if (VISITED.server() == null || source.getClient().level == null) {
@@ -98,9 +102,13 @@ public class AomcVisitedClient implements ClientModInitializer {
 		ResourceKey<Level> dimension = source.getClient().level.dimension();
 		String id = dimension.identifier().toString();
 		if (!confirm) {
+			Component button = Component.literal("[Confirm]").withStyle(style -> style
+					.withColor(ChatFormatting.RED)
+					.withUnderlined(true)
+					.withClickEvent(new ClickEvent.RunCommand("/visited clear confirm"))
+					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Forget the record for " + id))));
 			source.sendFeedback(Component.literal("This will forget the " + VISITED.count(dimension) + " chunks"
-					+ " recorded in " + id + ", so the next export starts from scratch. Run /visited clear confirm"
-					+ " to do it."));
+					+ " recorded in " + id + ", so the next export starts from scratch. ").append(button));
 			return 1;
 		}
 		int forgotten = VISITED.clear(dimension);
