@@ -10,6 +10,8 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +43,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 				ClientCommands.literal("visited")
 						.executes(context -> showCounts(context.getSource()))
 						.then(ClientCommands.literal("export").executes(context -> requestExport(context.getSource())))
+						.then(ClientCommands.literal("clear")
+								.executes(context -> clear(context.getSource(), false))
+								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true))))
 						.then(ClientCommands.literal("show")
 								.then(ClientCommands.literal("on").executes(context -> setShow(context.getSource(), true)))
 								.then(ClientCommands.literal("off").executes(context -> setShow(context.getSource(), false))))));
@@ -78,6 +83,32 @@ public class AomcVisitedClient implements ClientModInitializer {
 			source.sendFeedback(Component.literal("  none yet"));
 		}
 		counts.forEach((key, count) -> source.sendFeedback(Component.literal("  " + key + ": " + count)));
+		return 1;
+	}
+
+	/**
+	 * {@code /visited clear [confirm]}: forgets the record for the player's dimension. Without
+	 * {@code confirm} it only says what would be cleared, since a record can't be rebuilt.
+	 */
+	private static int clear(FabricClientCommandSource source, boolean confirm) {
+		if (VISITED.server() == null || source.getClient().level == null) {
+			source.sendError(Component.literal("Not connected to a world."));
+			return 0;
+		}
+		ResourceKey<Level> dimension = source.getClient().level.dimension();
+		String id = dimension.identifier().toString();
+		if (!confirm) {
+			source.sendFeedback(Component.literal("This will forget the " + VISITED.count(dimension) + " chunks"
+					+ " recorded in " + id + ", so the next export starts from scratch. Run /visited clear confirm"
+					+ " to do it."));
+			return 1;
+		}
+		int forgotten = VISITED.clear(dimension);
+		if (xaeroInstalled()) {
+			VisitedHighlighter.refreshAll();
+		}
+		source.sendFeedback(Component.literal("Forgot " + forgotten + " chunks recorded in " + id + ". Zoomed-out"
+				+ " world map views may show the old tint until you zoom in on them once."));
 		return 1;
 	}
 

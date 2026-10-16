@@ -189,10 +189,54 @@ public final class VisitedChunks {
 		return server;
 	}
 
+	/**
+	 * Forgets a dimension's records (the normal map and any cave layers), in memory and on disk. Returns how
+	 * many chunks were forgotten.
+	 */
+	public synchronized int clear(ResourceKey<Level> dimension) {
+		String id = dimension.identifier().toString();
+		int forgotten = 0;
+		for (String key : records.keySet().toArray(new String[0])) {
+			if (!key.equals(id) && !key.startsWith(id + "/")) {
+				continue;
+			}
+			forgotten += records.remove(key).size();
+			changed.remove(key);
+			dirty.remove(key);
+			// Bump rather than reset the region versions, so the map highlight's hash for every affected
+			// region differs from anything Xaero has cached and it redraws them.
+			Long2IntOpenHashMap counts = regionCounts.remove(key);
+			if (counts != null) {
+				Long2IntOpenHashMap versions = regionVersions.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
+				counts.keySet().forEach(region -> versions.addTo(region, 1));
+			}
+			if (server != null) {
+				try {
+					Files.deleteIfExists(fileFor(key));
+				} catch (IOException e) {
+					AomcVisitedClient.LOGGER.error("Could not delete {}", fileFor(key), e);
+				}
+			}
+		}
+		return forgotten;
+	}
+
 	/** A copy of one record (empty if there is none). */
 	public synchronized LongOpenHashSet snapshot(String key) {
 		LongOpenHashSet chunks = records.get(key);
 		return chunks == null ? new LongOpenHashSet() : new LongOpenHashSet(chunks);
+	}
+
+	/** How many chunks a dimension's records hold (the normal map and any cave layers). */
+	public synchronized int count(ResourceKey<Level> dimension) {
+		String id = dimension.identifier().toString();
+		int total = 0;
+		for (Map.Entry<String, LongOpenHashSet> record : records.entrySet()) {
+			if (record.getKey().equals(id) || record.getKey().startsWith(id + "/")) {
+				total += record.getValue().size();
+			}
+		}
+		return total;
 	}
 
 	/** Chunk counts per record for the current server. */
