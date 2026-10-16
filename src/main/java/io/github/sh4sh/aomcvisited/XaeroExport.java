@@ -52,6 +52,17 @@ public final class XaeroExport {
 	private static volatile long startedAt;
 	/** Longer than any real export (each area freezes the game for seconds, not minutes). */
 	private static final long STUCK_MS = 5 * 60 * 1000;
+	/**
+	 * Xaero's export task waits on its own thread, checking every 100 ms, until its "exporting" flag clears;
+	 * starting the next area before it has seen that sets the flag again and both tasks wait forever (seen in
+	 * the first two-area test). So the next area starts only once the task has returned
+	 * ({@code XaeroExportTaskMixin} reports it), or after this long if that hook is missing.
+	 */
+	private static final long TASK_END_FALLBACK_MS = 1000;
+	/** The run waiting to continue, if any. */
+	private static volatile Run current;
+	/** Set when Xaero's export task has returned. */
+	private static volatile boolean taskEnded;
 
 	private XaeroExport() {
 	}
@@ -62,6 +73,21 @@ public final class XaeroExport {
 	 */
 	static void reset() {
 		running = false;
+		current = null;
+	}
+
+	/** Called by {@code XaeroExportTaskMixin} when Xaero's export task has returned. */
+	public static void taskEnded() {
+		taskEnded = true;
+	}
+
+	/** Called every client tick: continues a run once Xaero's previous export task has finished. */
+	static void tick() {
+		Run run = current;
+		if (run != null && run.readyToContinue()) {
+			current = null;
+			run.continueAfterArea();
+		}
 	}
 
 	/**
@@ -151,6 +177,7 @@ public final class XaeroExport {
 					done(this, area, result);
 				}
 			};
+			taskEnded = false;
 			if (!processor.getMapSaveLoad().exportPNG(screen, selection)) {
 				return red("Xaero's World Map is already exporting. Try again when it's done.");
 			}
@@ -166,9 +193,14 @@ public final class XaeroExport {
 			return null;
 		}
 
+		/** What to do once Xaero's task for the current area has finished: see {@link #continueAfterArea}. */
+		private ExportScreen doneScreen;
+		private Component doneProblem;
+		private long doneAt;
+
 		/**
 		 * Runs on the main thread inside Xaero's export task. Afterwards Xaero clears its "exporting" flag and
-		 * shows {@code screen}, so the next step is queued to run after that.
+		 * shows {@code screen}; the next step waits for the task to return (see {@link #TASK_END_FALLBACK_MS}).
 		 */
 		private void done(ExportScreen screen, ExportAreas.Box area, PNGExportResult result) {
 			Component problem;
@@ -181,16 +213,26 @@ public final class XaeroExport {
 				problem = red("Xaero couldn't export area " + (index + 1) + " of " + areas.size() + ": ")
 						.append(result.getMessage());
 			}
-			client.execute(() -> {
-				if (client.gui.screen() == screen) {
-					client.gui.setScreen(null);
-				}
-				index++;
-				Component message = problem != null ? fail(problem) : next();
-				if (message != null) {
-					tell(message);
-				}
-			});
+			doneScreen = screen;
+			doneProblem = problem;
+			doneAt = System.currentTimeMillis();
+			current = this;
+		}
+
+		boolean readyToContinue() {
+			return taskEnded || System.currentTimeMillis() - doneAt > TASK_END_FALLBACK_MS;
+		}
+
+		/** Closes the screen Xaero showed, then exports the next area, or reports the problem. */
+		void continueAfterArea() {
+			if (client.gui.screen() == doneScreen) {
+				client.gui.setScreen(null);
+			}
+			index++;
+			Component message = doneProblem != null ? fail(doneProblem) : next();
+			if (message != null) {
+				tell(message);
+			}
 		}
 
 		/**

@@ -74,6 +74,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 	}
 
 	private void tick(Minecraft client) {
+		if (xaeroInstalled()) {
+			XaeroExport.tick();
+		}
 		if (exportNextTick) {
 			exportNextTick = false;
 			Component error = XaeroExport.start(client);
