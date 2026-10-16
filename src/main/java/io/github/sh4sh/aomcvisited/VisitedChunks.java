@@ -30,13 +30,15 @@ import java.util.stream.Stream;
  *
  * <p>Records are keyed like {@code minecraft:overworld} for the normal map, or
  * {@code minecraft:overworld/cave_<layer>} for one of Xaero's cave-mode layers, since an export covers one
- * layer. Stored as text under {@code <game dir>/aomc_visited/<server>/<namespace>/<path>.txt}, one
- * {@code x,z} chunk coordinate per line. Methods are synchronized because the disconnect event may arrive
+ * layer. Chunks whose map data differed from what the player's map had before (new ground, or something
+ * changed) are marked "changed". Stored as text under
+ * {@code <game dir>/aomc_visited/<server>/<namespace>/<path>.txt}, one {@code x,z} chunk coordinate per
+ * line, {@code x,z,c} for changed chunks. Methods are synchronized because the disconnect event may arrive
  * off the main thread.
  */
 public final class VisitedChunks {
 	private static final String HEADER = "# AOMC Visited: chunks Xaero's World Map wrote, as chunk x,z"
-			+ " (multiply by 16 for block coordinates)";
+			+ " (multiply by 16 for block coordinates); x,z,c = new or changed since the player's map had it";
 	/** Xaero's layer number for the normal (not cave-mode) map. */
 	public static final int SURFACE_LAYER = Integer.MAX_VALUE;
 
@@ -45,8 +47,12 @@ public final class VisitedChunks {
 	private String server;
 	/** Record key (see the class comment) to packed chunk positions. */
 	private final Map<String, LongOpenHashSet> records = new TreeMap<>();
+	/** Record key to the recorded chunks that were new or changed. */
+	private final Map<String, LongOpenHashSet> changed = new HashMap<>();
 	/** Record key to chunk counts per 512-block region (32 x 32 chunks), for the map highlight. */
 	private final Map<String, Long2IntOpenHashMap> regionCounts = new HashMap<>();
+	/** Record key to a per-region counter bumped on every change, so the map highlight knows to redraw. */
+	private final Map<String, Long2IntOpenHashMap> regionVersions = new HashMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
 	public VisitedChunks(Path root) {
@@ -59,8 +65,11 @@ public final class VisitedChunks {
 		return layer == SURFACE_LAYER ? id : id + "/cave_" + layer;
 	}
 
-	/** Called after Xaero writes fresh map data for a chunk. Returns whether the chunk is new to the record. */
-	public synchronized boolean mapped(ResourceKey<Level> dimension, int layer, int x, int z) {
+	/**
+	 * Called after Xaero writes fresh map data for a chunk; {@code differs} says whether it differs from what
+	 * the map had there. Returns whether the record changed (new chunk, or newly marked changed).
+	 */
+	public synchronized boolean mapped(ResourceKey<Level> dimension, int layer, int x, int z, boolean differs) {
 		if (server == null) {
 			Minecraft client = Minecraft.getInstance();
 			if (client.getConnection() == null) {
@@ -69,12 +78,37 @@ public final class VisitedChunks {
 			open(serverKey(client));
 		}
 		String key = recordKey(dimension, layer);
-		if (!records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
+		long pos = ChunkPos.pack(x, z);
+		long region = ChunkPos.pack(x >> 5, z >> 5);
+		boolean added = records.computeIfAbsent(key, k -> new LongOpenHashSet()).add(pos);
+		// Once changed, a chunk stays changed: later writes compare against this session's own data.
+		boolean nowChanged = differs && changed.computeIfAbsent(key, k -> new LongOpenHashSet()).add(pos);
+		if (!added && !nowChanged) {
 			return false;
 		}
-		regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(ChunkPos.pack(x >> 5, z >> 5), 1);
+		if (added) {
+			regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(region, 1);
+		}
+		regionVersions.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(region, 1);
 		dirty.add(key);
 		return true;
+	}
+
+	public synchronized boolean isChanged(String key, int x, int z) {
+		LongOpenHashSet chunks = changed.get(key);
+		return chunks != null && chunks.contains(ChunkPos.pack(x, z));
+	}
+
+	/** How many of a record's chunks are new or changed. */
+	public synchronized int changedCount(String key) {
+		LongOpenHashSet chunks = changed.get(key);
+		return chunks == null ? 0 : chunks.size();
+	}
+
+	/** Bumped whenever a region's part of the record changes. */
+	public synchronized int regionVersion(String key, int regionX, int regionZ) {
+		Long2IntOpenHashMap versions = regionVersions.get(key);
+		return versions == null ? 0 : versions.get(ChunkPos.pack(regionX, regionZ));
 	}
 
 	public synchronized boolean contains(String key, int x, int z) {
@@ -107,14 +141,17 @@ public final class VisitedChunks {
 				}
 				String path = rel.subpath(1, rel.getNameCount()).toString().replace('\\', '/');
 				String key = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
-				LongOpenHashSet chunks = load(file);
+				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
+				load(file, chunks, changedChunks);
 				records.put(key, chunks);
+				changed.put(key, changedChunks);
 				Long2IntOpenHashMap counts = new Long2IntOpenHashMap();
 				for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
 					long pos = it.nextLong();
 					counts.addTo(ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5), 1);
 				}
 				regionCounts.put(key, counts);
+				regionVersions.put(key, new Long2IntOpenHashMap(counts));
 			}
 		} catch (IOException e) {
 			AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", dir, e);
@@ -126,7 +163,9 @@ public final class VisitedChunks {
 		save();
 		server = null;
 		records.clear();
+		changed.clear();
 		regionCounts.clear();
+		regionVersions.clear();
 		dirty.clear();
 	}
 
@@ -138,7 +177,7 @@ public final class VisitedChunks {
 		for (String key : dirty) {
 			Path file = fileFor(key);
 			try {
-				write(file, records.get(key));
+				write(file, records.get(key), changed.getOrDefault(key, new LongOpenHashSet()));
 			} catch (IOException e) {
 				AomcVisitedClient.LOGGER.error("Could not save visited chunks to {}", file, e);
 			}
@@ -185,26 +224,27 @@ public final class VisitedChunks {
 		return root.resolve(server).resolve(key.substring(0, colon)).resolve(key.substring(colon + 1) + ".txt");
 	}
 
-	private static LongOpenHashSet load(Path file) throws IOException {
-		LongOpenHashSet chunks = new LongOpenHashSet();
+	private static void load(Path file, LongOpenHashSet chunks, LongOpenHashSet changedChunks) throws IOException {
 		for (String line : Files.readAllLines(file)) {
 			line = line.strip();
 			if (line.isEmpty() || line.startsWith("#")) {
 				continue;
 			}
-			int comma = line.indexOf(',');
+			String[] fields = line.split(",");
 			try {
-				chunks.add(ChunkPos.pack(Integer.parseInt(line.substring(0, comma)),
-						Integer.parseInt(line.substring(comma + 1))));
+				long pos = ChunkPos.pack(Integer.parseInt(fields[0]), Integer.parseInt(fields[1]));
+				chunks.add(pos);
+				if (fields.length > 2 && fields[2].equals("c")) {
+					changedChunks.add(pos);
+				}
 			} catch (RuntimeException e) {
 				AomcVisitedClient.LOGGER.warn("Skipping bad line in {}: {}", file, line);
 			}
 		}
-		return chunks;
 	}
 
 	/** Writes to a temporary file first, so a crash mid-write can't destroy the old record. */
-	private static void write(Path file, LongOpenHashSet chunks) throws IOException {
+	private static void write(Path file, LongOpenHashSet chunks, LongOpenHashSet changedChunks) throws IOException {
 		Files.createDirectories(file.getParent());
 		Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
 		try (BufferedWriter out = Files.newBufferedWriter(tmp)) {
@@ -212,7 +252,7 @@ public final class VisitedChunks {
 			out.newLine();
 			for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
 				long packed = it.nextLong();
-				out.write(ChunkPos.getX(packed) + "," + ChunkPos.getZ(packed));
+				out.write(ChunkPos.getX(packed) + "," + ChunkPos.getZ(packed) + (changedChunks.contains(packed) ? ",c" : ""));
 				out.newLine();
 			}
 		}

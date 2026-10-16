@@ -14,8 +14,9 @@ import xaero.map.world.MapDimension;
 import java.util.List;
 
 /**
- * Tints the chunks the next export will keep on Xaero's World Map (and its minimap), with a brighter edge
- * where the record ends. Registered by {@code XaeroWorldMapSessionMixin}; only load this class when
+ * Tints the chunks the next export will keep on Xaero's World Map (and its minimap): bright where the
+ * ground is new or changed, faint where it's unchanged since the player's map last had it, with a bright
+ * edge where the record ends. Registered by {@code XaeroWorldMapSessionMixin}; only load this class when
  * {@code xaeroworldmap} is installed.
  *
  * <p>Xaero caches highlights per 512-block region by {@link #calculateRegionHash}, so whenever what we'd
@@ -23,9 +24,11 @@ import java.util.List;
  */
 public final class VisitedHighlighter extends ChunkHighlighter {
 	/** Colours are 0xRRGGBBAA, as in Xaero's claims highlighter. */
-	private static final int FILL = 0x40FF4040;
+	private static final int CHANGED = 0x40FF4060;
+	private static final int UNCHANGED = 0x40FF4020;
 	private static final int EDGE = 0x40FF40C0;
-	private static final Component TOOLTIP = Component.literal("Recorded by AOMC Visited: will be exported");
+	private static final Component CHANGED_TOOLTIP = Component.literal("New or changed: will be exported");
+	private static final Component UNCHANGED_TOOLTIP = Component.literal("Unchanged since you last mapped it: will be exported");
 
 	/**
 	 * While an export screen is open (ours or Xaero's own) nothing is shown: with "Include Active
@@ -92,8 +95,7 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 
 	@Override
 	public int calculateRegionHash(ResourceKey<Level> dimension, int regionX, int regionZ) {
-		// Only ever grows while shown, so the count is enough to tell Xaero something changed.
-		return active() ? 1 + AomcVisitedClient.VISITED.regionCount(key(dimension), regionX, regionZ) : 0;
+		return active() ? 1 + AomcVisitedClient.VISITED.regionVersion(key(dimension), regionX, regionZ) : 0;
 	}
 
 	@Override
@@ -112,18 +114,22 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 		if (!chunkIsHighlit(dimension, x, z)) {
 			return null;
 		}
+		int fill = AomcVisitedClient.VISITED.isChanged(key(dimension), x, z) ? CHANGED : UNCHANGED;
 		return new int[] {
-				FILL,
-				recorded(dimension, x, z - 1) ? FILL : EDGE,
-				recorded(dimension, x + 1, z) ? FILL : EDGE,
-				recorded(dimension, x, z + 1) ? FILL : EDGE,
-				recorded(dimension, x - 1, z) ? FILL : EDGE,
+				fill,
+				recorded(dimension, x, z - 1) ? fill : EDGE,
+				recorded(dimension, x + 1, z) ? fill : EDGE,
+				recorded(dimension, x, z + 1) ? fill : EDGE,
+				recorded(dimension, x - 1, z) ? fill : EDGE,
 		};
 	}
 
 	@Override
 	public Component getChunkHighlightSubtleTooltip(ResourceKey<Level> dimension, int x, int z) {
-		return chunkIsHighlit(dimension, x, z) ? TOOLTIP : null;
+		if (!chunkIsHighlit(dimension, x, z)) {
+			return null;
+		}
+		return AomcVisitedClient.VISITED.isChanged(key(dimension), x, z) ? CHANGED_TOOLTIP : UNCHANGED_TOOLTIP;
 	}
 
 	@Override

@@ -76,8 +76,9 @@ final class XaeroExport {
 					// still catching up after a flight in the 0.1.1 test), and its writer runs on this thread,
 					// so this is exactly what the export just rendered. Save it so the file matches too.
 					LongOpenHashSet exported = AomcVisitedClient.VISITED.snapshot(key);
+					int changedCount = AomcVisitedClient.VISITED.changedCount(key);
 					AomcVisitedClient.VISITED.save();
-					Component message = clean(result.getFolderToOpen(), exported);
+					Component message = clean(result.getFolderToOpen(), exported, changedCount);
 					AomcVisitedClient.LOGGER.info(message.getString());
 					if (client.player != null) {
 						client.player.sendSystemMessage(message);
@@ -88,7 +89,7 @@ final class XaeroExport {
 		return null;
 	}
 
-	private static Component clean(Path folder, LongOpenHashSet chunks) {
+	private static Component clean(Path folder, LongOpenHashSet chunks, int changedCount) {
 		TileMasker.Result result;
 		try {
 			result = TileMasker.mask(folder, (x, z) -> chunks.contains(ChunkPos.pack(x, z)));
@@ -103,7 +104,7 @@ final class XaeroExport {
 					+ " cleaned. Don't upload it: turn the option on and run /visited export again.");
 		}
 		return Component.literal("Export cleaned and ready to upload: " + folder + "\nKept " + result.chunksKept()
-				+ " chunks you visited, blacked out " + result.chunksBlackedOut() + " chunks of older map, "
+				+ " chunks you visited (" + changedCount + " new or changed), blacked out " + result.chunksBlackedOut() + " chunks of older map, "
 				+ (result.tiles() - result.tilesDeleted()) + " of " + result.tiles() + " tiles left.");
 	}
 

@@ -13,11 +13,13 @@ import org.spongepowered.asm.mixin.injection.At;
 import xaero.map.MapProcessor;
 import xaero.map.MapWriter;
 import xaero.map.cache.BlockStateShortShapeCache;
+import xaero.map.region.MapBlock;
 import xaero.map.region.MapTile;
 import xaero.map.region.MapTileChunk;
 
 /**
- * Records every chunk Xaero's World Map writes fresh map data for. {@code writeChunk} builds a new
+ * Records every chunk Xaero's World Map writes fresh map data for, and whether it differs from what the
+ * map had there before. {@code writeChunk} builds a new
  * {@link MapTile} from the loaded chunk and stores it with {@code setTile}; it skips chunks that are missing
  * a neighbour or haven't changed since it last wrote them. Not required: if a
  * Xaero update moves this call, nothing is recorded and exports refuse rather than upload old data.
@@ -32,11 +34,32 @@ public abstract class XaeroMapWriterMixin {
 	private void aomcVisited$recordWrite(MapTileChunk tileChunk, int x, int z, MapTile tile,
 			BlockStateShortShapeCache cache, MapProcessor processor, Operation<Void> original,
 			@Local(argsOnly = true) Level level) {
+		boolean differs = differs(tileChunk.getTile(x, z), tile);
 		original.call(tileChunk, x, z, tile, cache, processor);
 		int chunkX = tile.getChunkX(), chunkZ = tile.getChunkZ();
-		if (AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, chunkX, chunkZ)
+		if (AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, chunkX, chunkZ, differs)
 				&& writingLayer == VisitedChunks.SURFACE_LAYER) {
 			VisitedHighlighter.refreshRegion(processor, level.dimension(), chunkX >> 5, chunkZ >> 5);
 		}
+	}
+
+	/**
+	 * Whether the fresh tile differs from what the map had for this chunk, compared the way Xaero itself
+	 * does while writing ({@code equalsSlopesExcluded}: slope shading depends on neighbours). No previous
+	 * data counts as different: that's new ground.
+	 */
+	private static boolean differs(MapTile previous, MapTile fresh) {
+		if (previous == null || previous == fresh || !previous.isLoaded()) {
+			return true;
+		}
+		for (int i = 0; i < 16; i++) {
+			for (int j = 0; j < 16; j++) {
+				MapBlock before = previous.getBlock(i, j), after = fresh.getBlock(i, j);
+				if (before == null || after == null ? before != after : !before.equalsSlopesExcluded(after)) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 }
