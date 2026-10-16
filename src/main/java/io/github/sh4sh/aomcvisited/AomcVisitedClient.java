@@ -180,7 +180,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
 					+ ago(now - record.savedMillis())));
 		}
-		message.append(Chat.line("Export and upload it? It's forgotten after a day."));
+		message.append(Chat.line("Export and upload? It's forgotten after a day."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
 						"Export it now, with anything you map from here on"),
