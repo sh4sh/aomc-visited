@@ -1,0 +1,22 @@
+{
+	"schemaVersion": 1,
+	"id": "aomc_visited",
+	"version": "${version}",
+	"name": "AOMC Visited",
+	"description": "Remembers where you have been, so you can export those areas from Xaero's World Map for the community webmap.",
+	"authors": [
+		"sh4sh"
+	],
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"io.github.sh4sh.aomcvisited.AomcVisitedClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
