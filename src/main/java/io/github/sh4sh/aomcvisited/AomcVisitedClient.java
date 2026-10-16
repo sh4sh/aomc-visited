@@ -41,7 +41,12 @@ public class AomcVisitedClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> VISITED.open(VisitedChunks.serverKey(client)));
-		ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> VISITED.close());
+		ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
+			VISITED.close();
+			if (xaeroInstalled()) {
+				XaeroExport.reset();
+			}
+		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> VISITED.close());
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(

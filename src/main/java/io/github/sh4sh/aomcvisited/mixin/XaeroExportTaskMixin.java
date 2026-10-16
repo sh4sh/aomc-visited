@@ -17,7 +17,7 @@ import java.nio.file.Path;
 public abstract class XaeroExportTaskMixin {
 	@WrapOperation(method = "lambda$run$0", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/Blaze3D;openPath(Ljava/nio/file/Path;)V"))
 	private void aomcVisited$dontOpenFolder(Path path, Operation<Void> original) {
-		if (!XaeroExport.running) {
+		if (!XaeroExport.active()) {
 			original.call(path);
 		}
 	}

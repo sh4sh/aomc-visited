@@ -25,9 +25,9 @@ import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /**
- * The chunks Xaero's World Map wrote this session, per server, dimension and map layer: exactly the ground
- * that is fresh in the player's Xaero map. {@code XaeroMapWriterMixin} reports
- * each write.
+ * The chunks Xaero's World Map has written since the record was last cleared or marked as uploaded, per
+ * server, dimension and map layer: the ground the player's Xaero map has fresh data for. {@code XaeroMapWriterMixin} reports each write. The record is kept across sessions;
+ * "mark as uploaded" bookkeeping ({@link #writes}, exports) only lasts the session.
  *
  * <p>Records are keyed like {@code minecraft:overworld} for the normal map, or
  * {@code minecraft:overworld/cave_<layer>} for one of Xaero's cave-mode layers, since an export covers one

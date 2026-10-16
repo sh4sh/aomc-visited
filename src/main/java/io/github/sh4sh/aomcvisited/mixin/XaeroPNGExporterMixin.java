@@ -19,7 +19,7 @@ import xaero.map.file.export.PNGExporter;
 public abstract class XaeroPNGExporterMixin {
 	@WrapOperation(method = "export", at = @At(value = "INVOKE", target = "Lxaero/lib/common/config/single/SingleConfigManager;getEffective(Lxaero/lib/common/config/option/ConfigOption;)Ljava/lang/Object;"))
 	private Object aomcVisited$forceOptions(SingleConfigManager manager, ConfigOption<?> option, Operation<Object> original) {
-		if (XaeroExport.running) {
+		if (XaeroExport.active()) {
 			if (option == WorldMapPrimaryClientConfigOptions.EXPORT_MULTIPLE_IMAGES) {
 				return Boolean.TRUE;
 			}

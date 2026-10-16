@@ -13,6 +13,7 @@ import net.minecraft.world.level.ChunkPos;
 import xaero.map.MapProcessor;
 import xaero.map.WorldMapSession;
 import xaero.map.file.export.PNGExportResult;
+import xaero.map.file.export.PNGExportResultType;
 import xaero.map.gui.ExportScreen;
 import xaero.map.gui.MapTileSelection;
 import xaero.map.world.MapDimension;
@@ -45,14 +46,32 @@ public final class XaeroExport {
 			Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}_x(-?\\d+)_z(-?\\d+)(?:_\\d+)?\\.png");
 	private static final DateTimeFormatter FOLDER_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss");
 
-	/**
-	 * True while our export runs. Meanwhile {@code XaeroPNGExporterMixin} hands Xaero's exporter our options
-	 * (the player's own settings are never changed) and {@code XaeroExportTaskMixin} stops Xaero opening
-	 * folders, since we open the combined one at the end.
-	 */
-	public static volatile boolean running;
+	/** True while our export runs; read through {@link #active()}. */
+	private static volatile boolean running;
+	/** When {@link #running} was set. If Xaero's exporter throws, it never reports back; see {@link #start}. */
+	private static volatile long startedAt;
+	/** Longer than any real export (each area freezes the game for seconds, not minutes). */
+	private static final long STUCK_MS = 5 * 60 * 1000;
 
 	private XaeroExport() {
+	}
+
+	/**
+	 * Forgets a run when leaving the world. Normally a no-op; it matters if Xaero's exporter threw, since
+	 * Xaero then never reports back and {@link #running} would keep forcing our options on Xaero's own export.
+	 */
+	static void reset() {
+		running = false;
+	}
+
+	/**
+	 * Whether our export is running. Meanwhile {@code XaeroPNGExporterMixin} hands Xaero's exporter our
+	 * options (the player's own settings are never changed) and {@code XaeroExportTaskMixin} stops Xaero
+	 * opening folders, since we open the combined one at the end. A run older than {@link #STUCK_MS} counts as
+	 * dead, so a crashed run can't keep affecting Xaero's own export.
+	 */
+	public static boolean active() {
+		return running && System.currentTimeMillis() - startedAt < STUCK_MS;
 	}
 
 	/**
@@ -60,7 +79,7 @@ public final class XaeroExport {
 	 * exports), with cave mode off. Returns an error for the player, or null if it started.
 	 */
 	static Component start(Minecraft client) {
-		if (running) {
+		if (active()) {
 			return red("An export is already running.");
 		}
 		WorldMapSession session = WorldMapSession.getCurrentSession();
@@ -88,6 +107,7 @@ public final class XaeroExport {
 			list.add(new int[] {ChunkPos.getX(pos), ChunkPos.getZ(pos)});
 		}
 		running = true;
+		startedAt = System.currentTimeMillis();
 		Component error = new Run(client, processor, key, ExportAreas.plan(list)).next();
 		if (error != null) {
 			running = false;
@@ -142,10 +162,16 @@ public final class XaeroExport {
 		 * shows {@code screen}, so the next step is queued to run after that.
 		 */
 		private void done(ExportScreen screen, ExportAreas.Box area, PNGExportResult result) {
-			Component problem = result.getType().isSuccess() && result.getFolderToOpen() != null
-					? clean(result.getFolderToOpen(), area)
-					: red("Xaero couldn't export area " + (index + 1) + " of " + areas.size() + ": ")
-							.append(result.getMessage());
+			Component problem;
+			if (result.getType() == PNGExportResultType.EMPTY) {
+				// Nothing Xaero could draw there (e.g. all of it black): nothing to clean, go on.
+				problem = null;
+			} else if (result.getType().isSuccess() && result.getFolderToOpen() != null) {
+				problem = clean(result.getFolderToOpen(), area);
+			} else {
+				problem = red("Xaero couldn't export area " + (index + 1) + " of " + areas.size() + ": ")
+						.append(result.getMessage());
+			}
 			client.execute(() -> {
 				if (client.gui.screen() == screen) {
 					client.gui.setScreen(null);
