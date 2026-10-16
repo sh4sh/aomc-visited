@@ -1,11 +1,12 @@
 {
 	"required": true,
 	"package": "io.github.sh4sh.aomcvisited.mixin",
+	"plugin": "io.github.sh4sh.aomcvisited.mixin.XaeroMixinPlugin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"ClientPacketListenerMixin"
+		"XaeroMapWriterMixin"
 	],
 	"injectors": {
-		"defaultRequire": 1
+		"defaultRequire": 0
 	}
 }

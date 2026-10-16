@@ -1,16 +1,13 @@
 package io.github.sh4sh.aomcvisited;
 
-import it.unimi.dsi.fastutil.longs.Long2LongMap;
-import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
-import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.util.Util;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.BufferedWriter;
@@ -26,110 +23,52 @@ import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /**
- * The chunks Xaero's World Map could map this session, per server and per dimension.
+ * The chunks Xaero's World Map wrote this session, per server, dimension and map layer: exactly the ground
+ * that is fresh in the player's Xaero map. {@code XaeroMapWriterMixin} reports
+ * each write.
  *
- * <p>Xaero only maps a chunk while it and all 8 of its neighbours are loaded, so the outer ring of what the
- * server sends is never mapped and may still hold old map data. We track the chunks loaded right now (chunk
- * data packets add, forget packets remove) and record a chunk once its whole 3x3 neighbourhood has stayed
- * loaded for {@link #DWELL_MS}. Without the wait, about 1 in 12 chunks on the edge of an elytra flight
- * unloaded before Xaero mapped it (AOMC test, October 2026).
- *
- * <p>Stored as text under {@code <game dir>/aomc_visited/<server>/<namespace>/<dimension>.txt}, one
- * {@code x,z} chunk coordinate per line. Methods are synchronized because the disconnect event may
- * arrive off the main thread.
+ * <p>Records are keyed like {@code minecraft:overworld} for the normal map, or
+ * {@code minecraft:overworld/cave_<layer>} for one of Xaero's cave-mode layers, since an export covers one
+ * layer. Stored as text under {@code <game dir>/aomc_visited/<server>/<namespace>/<path>.txt}, one
+ * {@code x,z} chunk coordinate per line. Methods are synchronized because the disconnect event may arrive
+ * off the main thread.
  */
 public final class VisitedChunks {
-	private static final String HEADER = "# AOMC Visited: chunks Xaero could map (loaded with all 8 neighbours),"
-			+ " as chunk x,z (multiply by 16 for block coordinates)";
-	/** How long a chunk's neighbourhood must stay loaded before we count it as mapped. */
-	private static final long DWELL_MS = 3000;
+	private static final String HEADER = "# AOMC Visited: chunks Xaero's World Map wrote, as chunk x,z"
+			+ " (multiply by 16 for block coordinates)";
+	/** Xaero's layer number for the normal (not cave-mode) map. */
+	public static final int SURFACE_LAYER = Integer.MAX_VALUE;
 
 	private final Path root;
 	/** Folder name of the current server, or null when not connected. */
 	private String server;
-	/** Dimension id (e.g. "minecraft:overworld") to packed chunk positions. */
+	/** Record key (see the class comment) to packed chunk positions. */
 	private final Map<String, LongOpenHashSet> byDimension = new TreeMap<>();
 	private final Set<String> dirty = new HashSet<>();
-
-	/** Chunks loaded in the client right now, in {@link #loadedLevel}. */
-	private final LongOpenHashSet loaded = new LongOpenHashSet();
-	/** The level {@link #loaded} belongs to; a new level (dimension change, respawn) starts empty. */
-	private ClientLevel loadedLevel;
-	/** Chunks whose neighbourhood is loaded but not yet for {@link #DWELL_MS}, to when it became loaded. */
-	private final Long2LongOpenHashMap pending = new Long2LongOpenHashMap();
 
 	public VisitedChunks(Path root) {
 		this.root = root;
 	}
 
-	/** Called for every chunk data packet, on the main thread. */
-	public synchronized void chunkLoaded(ClientPacketListener listener, ClientLevel level, int x, int z) {
+	/** The record key for a dimension and Xaero map layer. */
+	public static String recordKey(ResourceKey<Level> dimension, int layer) {
+		String id = dimension.identifier().toString();
+		return layer == SURFACE_LAYER ? id : id + "/cave_" + layer;
+	}
+
+	/** Called after Xaero writes fresh map data for a chunk. */
+	public synchronized void mapped(ResourceKey<Level> dimension, int layer, int x, int z) {
 		if (server == null) {
-			open(serverKey(Minecraft.getInstance(), listener));
-		}
-		if (level != loadedLevel) {
-			loaded.clear();
-			pending.clear();
-			loadedLevel = level;
-		}
-		loaded.add(ChunkPos.pack(x, z));
-		// The new chunk can complete its own neighbourhood or any of its 8 neighbours'.
-		LongOpenHashSet chunks = currentChunks();
-		long now = Util.getMillis();
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dz = -1; dz <= 1; dz++) {
-				long pos = ChunkPos.pack(x + dx, z + dz);
-				if (!chunks.contains(pos) && !pending.containsKey(pos) && neighbourhoodLoaded(x + dx, z + dz)) {
-					pending.put(pos, now);
-				}
+			Minecraft client = Minecraft.getInstance();
+			if (client.getConnection() == null) {
+				return;
 			}
+			open(serverKey(client, client.getConnection()));
 		}
-	}
-
-	/** Called for every forget-chunk packet, on the main thread. */
-	public synchronized void chunkUnloaded(ClientLevel level, int x, int z) {
-		if (level != loadedLevel) {
-			return;
+		String key = recordKey(dimension, layer);
+		if (byDimension.computeIfAbsent(key, k -> new LongOpenHashSet()).add(ChunkPos.pack(x, z))) {
+			dirty.add(key);
 		}
-		loaded.remove(ChunkPos.pack(x, z));
-		// The neighbourhoods this chunk belonged to are broken; they start over if it comes back.
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dz = -1; dz <= 1; dz++) {
-				pending.remove(ChunkPos.pack(x + dx, z + dz));
-			}
-		}
-	}
-
-	/** Records the pending chunks whose neighbourhood has stayed loaded long enough. Call regularly. */
-	public synchronized void tick() {
-		if (pending.isEmpty() || loadedLevel == null) {
-			return;
-		}
-		LongOpenHashSet chunks = currentChunks();
-		long now = Util.getMillis();
-		for (ObjectIterator<Long2LongMap.Entry> it = pending.long2LongEntrySet().fastIterator(); it.hasNext(); ) {
-			Long2LongMap.Entry entry = it.next();
-			if (now - entry.getLongValue() >= DWELL_MS) {
-				chunks.add(entry.getLongKey());
-				it.remove();
-				dirty.add(loadedLevel.dimension().identifier().toString());
-			}
-		}
-	}
-
-	private LongOpenHashSet currentChunks() {
-		return byDimension.computeIfAbsent(loadedLevel.dimension().identifier().toString(), d -> new LongOpenHashSet());
-	}
-
-	private boolean neighbourhoodLoaded(int x, int z) {
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dz = -1; dz <= 1; dz++) {
-				if (!loaded.contains(ChunkPos.pack(x + dx, z + dz))) {
-					return false;
-				}
-			}
-		}
-		return true;
 	}
 
 	/** Switches to the given server's record, loading it from disk. */
@@ -164,9 +103,6 @@ public final class VisitedChunks {
 		server = null;
 		byDimension.clear();
 		dirty.clear();
-		loaded.clear();
-		pending.clear();
-		loadedLevel = null;
 	}
 
 	/** Writes the dimensions that changed since the last save. */
@@ -189,21 +125,13 @@ public final class VisitedChunks {
 		return server;
 	}
 
-	/** The current dimension and a copy of its recorded chunks. */
-	public record Snapshot(String dimension, LongOpenHashSet chunks) {
+	/** A copy of one record (empty if there is none). */
+	public synchronized LongOpenHashSet snapshot(String key) {
+		LongOpenHashSet chunks = byDimension.get(key);
+		return chunks == null ? new LongOpenHashSet() : new LongOpenHashSet(chunks);
 	}
 
-	/** The current dimension's record, or null before the first chunk arrives. */
-	public synchronized Snapshot snapshot() {
-		if (loadedLevel == null) {
-			return null;
-		}
-		String dim = loadedLevel.dimension().identifier().toString();
-		LongOpenHashSet chunks = byDimension.get(dim);
-		return new Snapshot(dim, chunks == null ? new LongOpenHashSet() : new LongOpenHashSet(chunks));
-	}
-
-	/** Chunk counts per dimension for the current server. */
+	/** Chunk counts per record for the current server. */
 	public synchronized Map<String, Integer> counts() {
 		Map<String, Integer> counts = new TreeMap<>();
 		byDimension.forEach((dim, chunks) -> counts.put(dim, chunks.size()));

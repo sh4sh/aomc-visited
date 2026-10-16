@@ -25,7 +25,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 
 	private int ticksSinceSave;
 	/** The export screen opens a tick after the command, since the chat screen closes after running it. */
-	private VisitedChunks.Snapshot exportNextTick;
+	private boolean exportNextTick;
 
 	@Override
 	public void onInitializeClient() {
@@ -35,11 +35,10 @@ public class AomcVisitedClient implements ClientModInitializer {
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> VISITED.close());
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
-			VISITED.tick();
-			if (exportNextTick != null) {
-				Component error = XaeroExport.open(client, exportNextTick);
-				exportNextTick = null;
-				if (error != null) {
+			if (exportNextTick) {
+				exportNextTick = false;
+				Component error = XaeroExport.open(client);
+				if (error != null && client.player != null) {
 					client.player.sendSystemMessage(error);
 				}
 			}
@@ -55,12 +54,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 						context.getSource().sendError(Component.literal("Exporting needs Xaero's World Map."));
 						return 0;
 					}
-					VisitedChunks.Snapshot snapshot = VISITED.snapshot();
-					if (snapshot == null || snapshot.chunks().isEmpty()) {
-						context.getSource().sendError(Component.literal("Nothing recorded in this dimension yet."));
-						return 0;
-					}
-					exportNextTick = snapshot;
+					exportNextTick = true;
 					return 1;
 				})).executes(context -> {
 					String server = VISITED.server();

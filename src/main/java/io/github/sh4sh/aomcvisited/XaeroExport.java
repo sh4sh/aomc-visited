@@ -24,25 +24,27 @@ final class XaeroExport {
 	}
 
 	/**
-	 * Opens Xaero's export screen with the bounding box of the visited chunks selected; once the export
-	 * succeeds, blacks out everything that wasn't visited. Returns an error for the player, or null.
+	 * Opens Xaero's export screen with the bounding box of the chunks Xaero wrote this session selected, for
+	 * the dimension and layer its map is showing (that's what it exports). Once the export succeeds, blacks
+	 * out everything else. Returns an error for the player, or null.
 	 */
-	static Component open(Minecraft client, VisitedChunks.Snapshot visited) {
+	static Component open(Minecraft client) {
 		WorldMapSession session = WorldMapSession.getCurrentSession();
 		MapProcessor processor = session == null ? null : session.getMapProcessor();
-		if (processor == null || !processor.isMapWorldUsable()) {
+		MapDimension shown = processor == null || !processor.isMapWorldUsable() ? null
+				: processor.getMapWorld().getCurrentDimension();
+		if (shown == null) {
 			return Component.literal("Xaero's World Map isn't ready yet. Open the world map once, then try again.");
 		}
-		// Xaero exports whichever dimension its map is showing, which the player can switch.
-		MapDimension shown = processor.getMapWorld().getCurrentDimension();
-		String shownId = shown == null ? null : shown.getDimId().identifier().toString();
-		if (!visited.dimension().equals(shownId)) {
-			return Component.literal("Xaero's World Map is showing " + shownId + ", but you're in "
-					+ visited.dimension() + ". Switch the world map back to this dimension, then try again.");
+		String key = VisitedChunks.recordKey(shown.getDimId(), processor.getCurrentCaveLayer());
+		LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
+		if (chunks.isEmpty()) {
+			return Component.literal("Nothing recorded for " + key + " yet. If Xaero has been mapping and this"
+					+ " stays empty, this version of Xaero's World Map may not be supported.");
 		}
 
 		int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
-		for (LongIterator it = visited.chunks().iterator(); it.hasNext(); ) {
+		for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
 			long pos = it.nextLong();
 			minX = Math.min(minX, ChunkPos.getX(pos));
 			maxX = Math.max(maxX, ChunkPos.getX(pos));
@@ -52,7 +54,6 @@ final class XaeroExport {
 		MapTileSelection selection = new MapTileSelection(minX, minZ);
 		selection.setEnd(maxX, maxZ);
 
-		LongOpenHashSet chunks = visited.chunks();
 		client.gui.setScreen(new ExportScreen(null, null, processor, selection) {
 			@Override
 			public void onExportDone(PNGExportResult result) {
