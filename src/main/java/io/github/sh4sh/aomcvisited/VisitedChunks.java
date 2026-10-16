@@ -73,6 +73,15 @@ public final class VisitedChunks {
 	private boolean exportsDirty;
 	/** The normal-map records found on disk when the server was opened: ground mapped in earlier sessions. */
 	private List<Earlier> earlier = List.of();
+	/** The normal-map records forgotten when the server was opened, for being too old. */
+	private List<Earlier> expired = List.of();
+
+	/**
+	 * Records last saved longer ago than this are forgotten when joining. Keeping the record across
+	 * sessions is for a crash or a short break; older ground may be out of date, and the webmap can't tell
+	 * (sh4sh, October 2026).
+	 */
+	public static final long FORGET_AFTER_MS = 24 * 60 * 60 * 1000L;
 
 	/** A record from an earlier session: its key, chunk count, and when it was last saved. */
 	public record Earlier(String key, int chunks, long savedMillis) {
@@ -162,7 +171,8 @@ public final class VisitedChunks {
 			return;
 		}
 		loadExports(dir.resolve("exports.txt"));
-		List<Earlier> found = new java.util.ArrayList<>();
+		List<Earlier> found = new java.util.ArrayList<>(), tooOld = new java.util.ArrayList<>();
+		long now = System.currentTimeMillis();
 		try (Stream<Path> files = Files.walk(dir)) {
 			for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".txt"))::iterator) {
 				Path rel = dir.relativize(file);
@@ -173,8 +183,17 @@ public final class VisitedChunks {
 				String key = rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
+				long saved = Files.getLastModifiedTime(file).toMillis();
+				Earlier record = new Earlier(key, chunks.size(), saved);
+				if (now - saved > FORGET_AFTER_MS) {
+					Files.delete(file);
+					if (!key.contains("/") && !chunks.isEmpty()) {
+						tooOld.add(record);
+					}
+					continue;
+				}
 				if (!key.contains("/") && !chunks.isEmpty()) {
-					found.add(new Earlier(key, chunks.size(), Files.getLastModifiedTime(file).toMillis()));
+					found.add(record);
 				}
 				records.put(key, chunks);
 				changed.put(key, changedChunks);
@@ -190,7 +209,18 @@ public final class VisitedChunks {
 			AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", dir, e);
 		}
 		found.sort(java.util.Comparator.comparing(Earlier::key));
+		tooOld.sort(java.util.Comparator.comparing(Earlier::key));
 		earlier = List.copyOf(found);
+		expired = List.copyOf(tooOld);
+		if (exports.values().removeIf(export -> !records.containsKey(export.key()))) {
+			exportsDirty = true;
+			saveExports();
+		}
+	}
+
+	/** The records forgotten when joining for being older than {@link #FORGET_AFTER_MS}. */
+	public synchronized List<Earlier> expired() {
+		return expired;
 	}
 
 	/**
@@ -214,6 +244,7 @@ public final class VisitedChunks {
 		nextExport = 1;
 		exportsDirty = false;
 		earlier = List.of();
+		expired = List.of();
 		dirty.clear();
 	}
 

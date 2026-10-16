@@ -42,8 +42,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 
 	/** Wait a few seconds after joining, so the reminder isn't lost among the server's join messages. */
 	private static final int REMINDER_DELAY_TICKS = 5 * 20;
-	/** Earlier ground older than this gets a stronger warning. */
-	private static final long STALE_MS = 24 * 60 * 60 * 1000L;
 
 	@Override
 	public void onInitializeClient() {
@@ -153,33 +151,46 @@ public class AomcVisitedClient implements ClientModInitializer {
 	}
 
 	/**
-	 * Shortly after joining: if ground mapped in an earlier session is still recorded (the game crashed, or
-	 * the player left before uploading), say so, with how old it is. The webmap can't tell old map from new,
-	 * so the longer it waits the likelier it is to overwrite newer map someone else uploaded: nudge the
-	 * player to export it now, or start over.
+	 * Shortly after joining: say if ground from an earlier session was forgotten for being too old (see
+	 * {@link VisitedChunks#FORGET_AFTER_MS}), and if more recent ground is still recorded (the game crashed,
+	 * the player left before uploading, or just what Xaero mapped after the last export), with how old it is
+	 * and buttons to export it or start over.
 	 */
 	private static void remindOfEarlierGround(Minecraft client) {
-		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
-		if (earlier.isEmpty() || client.player == null) {
+		if (client.player == null) {
 			return;
 		}
 		long now = System.currentTimeMillis();
-		boolean stale = earlier.stream().anyMatch(record -> now - record.savedMillis() > STALE_MS);
-		String text = "You have map data from an earlier session that isn't uploaded yet:";
-		MutableComponent message = stale ? Chat.warning(text) : Chat.info(text);
-		for (VisitedChunks.Earlier record : earlier) {
-			String name = record.key().startsWith("minecraft:") ? record.key().substring("minecraft:".length()) : record.key();
-			message.append(Chat.line(name + ": " + record.chunks() + " chunks, last mapped " + ago(now - record.savedMillis())));
+		List<VisitedChunks.Earlier> expired = VISITED.expired();
+		if (!expired.isEmpty()) {
+			MutableComponent message = Chat.info("Forgot map data from more than a day ago, since it may be out of"
+					+ " date by now:");
+			for (VisitedChunks.Earlier record : expired) {
+				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
+						+ ago(now - record.savedMillis())));
+			}
+			Chat.send(client, message);
 		}
-		message.append(Chat.line(stale
-				? "Some of it is more than a day old. If others have mapped there since, uploading it would"
-						+ " overwrite their newer map. If in doubt, start over."
-				: "Export and upload it soon: the webmap can't tell old map from new."));
+		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
+		if (earlier.isEmpty()) {
+			return;
+		}
+		MutableComponent message = Chat.info("You have map data from an earlier session that isn't uploaded yet:");
+		for (VisitedChunks.Earlier record : earlier) {
+			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
+					+ ago(now - record.savedMillis())));
+		}
+		message.append(Chat.line("Your next export includes it. The webmap can't tell old map from new, so export"
+				+ " it today: after a day it's forgotten."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
 						"Export it now, with anything you map from here on"),
 				Chat.button("Start over", ChatFormatting.RED, "/visited clear all",
 						"Forget it in every dimension (asks to confirm)"))));
+	}
+
+	private static String shortName(String key) {
+		return key.startsWith("minecraft:") ? key.substring("minecraft:".length()) : key;
 	}
 
 	private static String ago(long ms) {
