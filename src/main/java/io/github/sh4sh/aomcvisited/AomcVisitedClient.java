@@ -170,33 +170,38 @@ public class AomcVisitedClient implements ClientModInitializer {
 		long now = System.currentTimeMillis();
 		List<VisitedChunks.Earlier> expired = VISITED.expired();
 		if (!expired.isEmpty()) {
-			MutableComponent message = Chat.info("Forgot map data from more than an hour ago, since it may be out of"
-					+ " date by now:");
+			MutableComponent message = Chat.info("Forgot your map data from last time (" + ago(now - lastHere(expired))
+					+ "): you were away for over an hour, so it may be out of date by now.");
 			for (VisitedChunks.Earlier record : expired) {
-				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
-						+ ago(now - record.savedMillis())));
+				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
 			}
 			Chat.send(client, message.append(Chat.buttons(Chat.button("Restore", ChatFormatting.GOLD,
 					"/visited restore", "May be out of date: only restore it if nobody else has mapped there since."
-							+ " Can be restored until a day after you last mapped it."))));
+							+ " Can be restored until a day after you were last here."))));
 		}
 		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
 		if (earlier.isEmpty()) {
 			return;
 		}
+		String when = ago(now - lastHere(earlier));
 		MutableComponent message = Chat.info(VISITED.crashedLastTime()
-				? "Your game didn't close normally last time, so your map data was kept:"
-				: "You have map data from an earlier session that isn't uploaded yet:");
+				? "Your game didn't close normally last time (" + when + "), so your map data was kept:"
+				: "Your map data from last time (" + when + ") is still here, not uploaded yet:");
 		for (VisitedChunks.Earlier record : earlier) {
-			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks, last mapped "
-					+ ago(now - record.savedMillis())));
+			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}
-		message.append(Chat.line("Export and upload? It's forgotten after an hour."));
+		message.append(Chat.line("Nothing you need to do: keep playing, and your next export includes it."));
+		message.append(Chat.line("It's only forgotten if you're offline for over an hour."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
 						"Export it now, with anything you map from here on"),
 				Chat.button("Start over", ChatFormatting.RED, "/visited clear all",
 						"Forget it in every dimension (asks to confirm)"))));
+	}
+
+	/** When the player was last here, going by the records' save times. */
+	private static long lastHere(List<VisitedChunks.Earlier> records) {
+		return records.stream().mapToLong(VisitedChunks.Earlier::savedMillis).max().orElse(0);
 	}
 
 	private static String shortName(String key) {

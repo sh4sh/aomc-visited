@@ -89,14 +89,15 @@ public final class VisitedChunks {
 	private List<Earlier> expired = List.of();
 
 	/**
-	 * Records last saved longer ago than this are forgotten when joining. Keeping the record across
+	 * Records are forgotten when joining if the player was away longer than this. Keeping the record across
 	 * sessions is for a crash or a short break; older ground may be out of date, and the webmap can't tell
-	 * (sh4sh, October 2026).
+	 * (sh4sh, October 2026). Only time away counts, the same for every dimension: {@link #save} stamps every
+	 * record file with the time, and on joining the newest stamp says when the player was last here.
 	 */
 	public static final long FORGET_AFTER_MS = 60 * 60 * 1000L;
 	/**
 	 * Forgotten records are kept in this folder (under the server's), so the player can restore them, until
-	 * this long after they were last mapped (sh4sh, October 2026).
+	 * this long after the player was last here (sh4sh, October 2026).
 	 */
 	private static final String FORGOTTEN = "forgotten";
 	public static final long KEEP_FORGOTTEN_MS = 24 * 60 * 60 * 1000L;
@@ -264,22 +265,33 @@ public final class VisitedChunks {
 		loadExports(dir.resolve("exports.txt"));
 		List<Earlier> found = new java.util.ArrayList<>(), tooOld = new java.util.ArrayList<>();
 		long now = System.currentTimeMillis();
-		for (Path file : recordFiles(dir)) {
+		List<Path> files = recordFiles(dir).stream().filter(file -> {
 			String key = keyFor(dir, file);
-			if (key == null || key.startsWith(FORGOTTEN + ":") || !onWebmap(key)) {
-				continue;
+			return key != null && !key.startsWith(FORGOTTEN + ":") && onWebmap(key);
+		}).toList();
+		// When the player was last here: every record file is stamped on each save, so the newest stamp.
+		// Files saved by versions before 0.2.17 were only stamped when they changed.
+		long saved = 0;
+		for (Path file : files) {
+			try {
+				saved = Math.max(saved, Files.getLastModifiedTime(file).toMillis());
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not read the time of {}", file, e);
 			}
+		}
+		for (Path file : files) {
+			String key = keyFor(dir, file);
 			try {
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
-				long saved = Files.getLastModifiedTime(file).toMillis();
 				Earlier record = new Earlier(key, chunks.size(), saved);
 				if (now - saved > forgetAfter) {
-					// Kept a while in case the player wants it back (see restoreForgotten); moving keeps the
-					// file's time, which says when it was last mapped.
+					// Kept a while in case the player wants it back (see restoreForgotten); the file's time says
+					// when the player was last here.
 					Path kept = forgottenFile(key);
 					Files.createDirectories(kept.getParent());
 					Files.move(file, kept, StandardCopyOption.REPLACE_EXISTING);
+					Files.setLastModifiedTime(kept, java.nio.file.attribute.FileTime.fromMillis(saved));
 					if (!key.contains("/") && !chunks.isEmpty()) {
 						tooOld.add(record);
 					}
@@ -305,7 +317,7 @@ public final class VisitedChunks {
 	}
 
 	/**
-	 * Puts back the records forgotten for being old, if they were last mapped less than
+	 * Puts back the records forgotten for being old, if the player was last here less than
 	 * {@link #KEEP_FORGOTTEN_MS} ago, adding them to whatever was mapped since. Returns how many chunks
 	 * were added, or -1 when not connected.
 	 */
@@ -384,7 +396,10 @@ public final class VisitedChunks {
 		dirty.clear();
 	}
 
-	/** Writes the records that changed since the last save. */
+	/**
+	 * Writes the records that changed since the last save, and stamps every record file with the time, so
+	 * that on joining, a record's age is the time the player was away (see {@link #FORGET_AFTER_MS}).
+	 */
 	public synchronized void save() {
 		if (server == null) {
 			return;
@@ -398,6 +413,17 @@ public final class VisitedChunks {
 			}
 		}
 		dirty.clear();
+		java.nio.file.attribute.FileTime now = java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis());
+		for (String key : records.keySet()) {
+			Path file = fileFor(key);
+			try {
+				if (Files.exists(file)) {
+					Files.setLastModifiedTime(file, now);
+				}
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not stamp {}", file, e);
+			}
+		}
 		if (exportsDirty || !exports.isEmpty()) {
 			saveExports();
 		}
@@ -680,7 +706,7 @@ public final class VisitedChunks {
 		return rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
 	}
 
-	/** Deletes the forgotten records whose key matches, if last mapped before {@code before}. */
+	/** Deletes the forgotten records whose key matches, if the player was last here before {@code before}. */
 	private void deleteForgotten(java.util.function.Predicate<String> matches, long before) {
 		Path dir = root.resolve(server).resolve(FORGOTTEN);
 		for (Path file : recordFiles(dir)) {
