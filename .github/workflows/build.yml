@@ -54,15 +54,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Download Xaero's World Map
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/xaeroworldmap.jar" \
-            https://cdn.modrinth.com/data/NcUtCpym/versions/nz9xjzWi/xaeroworldmap-fabric-26.3-1.47.0.jar
-          echo "e80c6bd6729c059c3e433e7e77714ed4c7f20e1a487f7449cf47282e9816b51523efe39183090b76a56834ffc67090317e70324730f311ba2e71fa24eec539c6  $RUNNER_TEMP/xaeroworldmap.jar" \
-            | sha512sum -c -
-
       - name: Build
-        run: ./gradlew build "-Pxaero_worldmap_jar=$RUNNER_TEMP/xaeroworldmap.jar"
+        run: ./gradlew build
 
       - uses: actions/upload-artifact@v4
         with:
