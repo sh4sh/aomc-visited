@@ -430,7 +430,9 @@ public final class XaeroExport {
 			try {
 				if (job.root == null) {
 					Path mapExports = tiles ? written.getParent() : written;
-					job.root = mapExports.resolve("aomc-visited-" + LocalDateTime.now().format(FOLDER_TIME));
+					// A one-dimension export has no subfolders, so its name says which map it's for.
+					String dimension = job.keys.size() == 1 ? folderName(key) + "-" : "";
+					job.root = mapExports.resolve("aomc-visited-" + dimension + LocalDateTime.now().format(FOLDER_TIME));
 				}
 				if (folder == null) {
 					// One dimension needs no folder of its own.
