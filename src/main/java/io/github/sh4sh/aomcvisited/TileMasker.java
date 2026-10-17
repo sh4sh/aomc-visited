@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public final class TileMasker {
-	public interface Visited {
+	public interface Recorded {
 		boolean contains(int chunkX, int chunkZ);
 	}
 
@@ -30,7 +30,7 @@ public final class TileMasker {
 	private TileMasker() {
 	}
 
-	public static Result mask(Path folder, Visited visited) throws IOException {
+	public static Result mask(Path folder, Recorded recorded) throws IOException {
 		List<Path> files;
 		try (Stream<Path> list = Files.list(folder)) {
 			files = list.filter(p -> TILE.matcher(p.getFileName().toString()).matches()).sorted().toList();
@@ -39,12 +39,12 @@ public final class TileMasker {
 		for (Path file : files) {
 			Matcher m = TILE.matcher(file.getFileName().toString());
 			m.matches();
-			total = total.plus(maskImage(file, Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), visited));
+			total = total.plus(maskImage(file, Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), recorded));
 		}
 		return total;
 	}
 
-	public static Result maskImage(Path file, int blockX, int blockZ, Visited visited) throws IOException {
+	public static Result maskImage(Path file, int blockX, int blockZ, Recorded recorded) throws IOException {
 		if (Math.floorMod(blockX, 16) != 0 || Math.floorMod(blockZ, 16) != 0) {
 			throw new IOException("Image is not chunk-aligned, refusing to guess: " + file);
 		}
@@ -60,7 +60,7 @@ public final class TileMasker {
 				int x0 = cellX * 16, z0 = cellZ * 16;
 				int x1 = Math.min(x0 + 16, width), z1 = Math.min(z0 + 16, height);
 				boolean terrain = hasTerrain(pixels, width, x0, z0, x1, z1);
-				if (visited.contains(Math.floorDiv(blockX, 16) + cellX, Math.floorDiv(blockZ, 16) + cellZ)) {
+				if (recorded.contains(Math.floorDiv(blockX, 16) + cellX, Math.floorDiv(blockZ, 16) + cellZ)) {
 					if (terrain) {
 						kept++;
 					}

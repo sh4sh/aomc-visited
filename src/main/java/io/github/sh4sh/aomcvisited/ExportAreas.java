@@ -93,6 +93,7 @@ public final class ExportAreas {
 		split(high, regions, out);
 	}
 
+	/** This is a slow way to do things, but should be fine in practical terms. */
 	private static List<Box> mergeOverlapping(List<Box> boxes) {
 		List<Box> result = new ArrayList<>(boxes);
 		boolean merged = true;

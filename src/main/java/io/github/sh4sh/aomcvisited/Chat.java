@@ -9,6 +9,8 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.Mth;
 
+import java.nio.file.Path;
+
 public final class Chat {
 	private static final String NAME = "AOMC Visited";
 	private static final String BUTTON_GAP = "   ";
@@ -52,7 +54,7 @@ public final class Chat {
 				.withHoverEvent(new HoverEvent.ShowText(Component.literal(hover))));
 	}
 
-	public static MutableComponent openButton(String label, java.nio.file.Path path) {
+	public static MutableComponent openButton(String label, Path path) {
 		return Component.literal("[" + label + "]").withStyle(style -> style
 				.withColor(ChatFormatting.AQUA)
 				.withClickEvent(new ClickEvent.OpenFile(path))

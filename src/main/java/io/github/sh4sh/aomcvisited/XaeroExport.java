@@ -373,7 +373,7 @@ public final class XaeroExport {
 					exported.add(pos);
 				}
 			}
-			TileMasker.Visited visited = (x, z) -> chunks.contains(ChunkPos.pack(x, z));
+			TileMasker.Recorded recorded = (x, z) -> chunks.contains(ChunkPos.pack(x, z));
 			boolean tiles = EXPORT_FOLDER.matcher(written.getFileName().toString()).matches();
 			Path image = null;
 			try {
@@ -387,7 +387,7 @@ public final class XaeroExport {
 					Files.createDirectories(folder);
 				}
 				if (tiles) {
-					total = total.plus(TileMasker.mask(written, visited));
+					total = total.plus(TileMasker.mask(written, recorded));
 					moveImages(written);
 					Files.deleteIfExists(written);
 				} else {
@@ -402,7 +402,7 @@ public final class XaeroExport {
 					if (read == null || read.getWidth() != width || read.getHeight() != height) {
 						return red("Xaero scaled the export down, so it can't be cleaned. Don't upload " + image + ".");
 					}
-					TileMasker.Result result = TileMasker.maskImage(image, blockX, blockZ, visited);
+					TileMasker.Result result = TileMasker.maskImage(image, blockX, blockZ, recorded);
 					total = total.plus(result);
 					if (result.tilesDeleted() == 0) {
 						Files.move(image, folder.resolve(image.getFileName()));
