@@ -2,13 +2,27 @@ name: Build
 
 on:
   push:
+    branches: ["main"]
+    tags: ["v*"]
   pull_request:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(grep '^version=' gradle.properties | cut -d= -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version=$version in gradle.properties"
+            exit 1
+          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -33,3 +47,11 @@ jobs:
           path: |
             build/libs/*.jar
             !build/libs/*-sources.jar
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "build/libs/aomc-visited-${GITHUB_REF_NAME#v}.jar" \
+            --title "${GITHUB_REF_NAME#v}" --generate-notes

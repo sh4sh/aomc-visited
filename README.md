@@ -5,7 +5,7 @@ automatically prepares Xaero exports that you can upload to our webmap at https:
 
 Requires Xaero World Map.
 
-## Use
+## How to use
 
 1. Open the world map to see areas the mod has recorded: green outline around areas the export will include,
    green fill on ground that's new or changed.
