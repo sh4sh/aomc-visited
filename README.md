@@ -1,5 +1,7 @@
 # AOMC Visited
 
+By sunngoose.
+
 A Fabric mod for the About Oliver Minecraft server. It remembers where you've been and exports just that
 ground from Xaero's World Map, ready to upload to the community webmap at https://map.diorite.xyz.
 

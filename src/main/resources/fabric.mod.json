@@ -5,7 +5,7 @@
 	"name": "AOMC Visited",
 	"description": "Remembers where you have been, so you can export those areas from Xaero's World Map for the community webmap.",
 	"authors": [
-		"sh4sh"
+		"sunngoose"
 	],
 	"environment": "client",
 	"entrypoints": {
