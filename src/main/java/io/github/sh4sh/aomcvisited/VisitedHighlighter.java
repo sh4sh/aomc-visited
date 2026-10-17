@@ -1,8 +1,12 @@
 package io.github.sh4sh.aomcvisited;
 
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import xaero.map.MapProcessor;
 import xaero.map.WorldMapSession;
@@ -12,6 +16,7 @@ import xaero.map.highlight.HighlighterRegistry;
 import xaero.map.world.MapDimension;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Shows the next export on Xaero's World Map (and its minimap): new or changed ground is filled green,
@@ -20,7 +25,10 @@ import java.util.List;
  * {@code xaeroworldmap} is installed.
  *
  * <p>Xaero caches highlights per 512-block region by {@link #calculateRegionHash}, so whenever what we'd
- * show changes we clear that cache ({@link #refreshRegion}, {@link #refreshAll}).
+ * show changes we clear that cache ({@link #refreshChanged}, {@link #refreshAll}). Xaero reloads a region
+ * whose hash differs from the one saved with its image, which slows the world map down while it catches
+ * up, so the hash only changes when the highlight does: it's 0 where nothing is drawn, and otherwise a
+ * hash of the region's record that stays the same across restarts ({@code VisitedChunks.regionHashes}).
  */
 public final class VisitedHighlighter extends ChunkHighlighter {
 	/** Colours are 0xRRGGBBAA, as in Xaero's claims highlighter. */
@@ -48,7 +56,9 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 	/** Hides the highlight while an export screen is open. Call once at startup. */
 	static void registerEvents() {
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
-			if (screen instanceof ExportScreen) {
+			// Not for our own export, which turns highlights off in Xaero's exporter instead: hiding them
+			// would make Xaero reload every recorded region afterwards.
+			if (screen instanceof ExportScreen && !XaeroExport.active()) {
 				exportScreenOpen = true;
 				refreshAll();
 				ScreenEvents.remove(screen).register(removed -> {
@@ -67,12 +77,27 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 		}
 	}
 
-	/** Redraws one region's highlight after a chunk in it was recorded. */
-	public static void refreshRegion(MapProcessor processor, ResourceKey<Level> dimension, int regionX, int regionZ) {
-		MapDimension mapDimension = processor.getMapWorld() == null ? null : processor.getMapWorld().getDimension(dimension);
-		if (mapDimension != null) {
-			mapDimension.getHighlightHandler().clearCachedHash(regionX, regionZ);
+	/**
+	 * Redraws the regions whose highlight changed since the last call. Called about once a second rather
+	 * than on every recorded chunk, so a flight doesn't keep restarting Xaero's redraw of the same region.
+	 */
+	static void refreshChanged() {
+		Map<String, LongOpenHashSet> changed = AomcVisitedClient.VISITED.takeChangedRegions();
+		MapProcessor processor = processor();
+		if (changed.isEmpty() || processor == null || processor.getMapWorld() == null) {
+			return;
 		}
+		changed.forEach((key, regions) -> {
+			if (key.contains("/")) {
+				return; // A cave-mode layer: not shown.
+			}
+			MapDimension mapDimension = processor.getMapWorld()
+					.getDimension(ResourceKey.create(Registries.DIMENSION, Identifier.parse(key)));
+			if (mapDimension != null) {
+				regions.forEach(region -> mapDimension.getHighlightHandler()
+						.clearCachedHash(ChunkPos.getX(region), ChunkPos.getZ(region)));
+			}
+		});
 	}
 
 	private static MapProcessor processor() {
@@ -95,7 +120,8 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 
 	@Override
 	public int calculateRegionHash(ResourceKey<Level> dimension, int regionX, int regionZ) {
-		return active() ? 1 + AomcVisitedClient.VISITED.regionVersion(key(dimension), regionX, regionZ) : 0;
+		return regionHasHighlights(dimension, regionX, regionZ)
+				? AomcVisitedClient.VISITED.regionHash(key(dimension), regionX, regionZ) : 0;
 	}
 
 	@Override

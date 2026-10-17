@@ -4,8 +4,6 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import io.github.sh4sh.aomcvisited.AomcVisitedClient;
-import io.github.sh4sh.aomcvisited.VisitedChunks;
-import io.github.sh4sh.aomcvisited.VisitedHighlighter;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -65,10 +63,7 @@ public abstract class XaeroMapWriterMixin {
 		// No tile there yet means Xaero took a fresh one from its pool: ground the map didn't have.
 		boolean differs = aomcVisited$differs || tileChunk.getTile(x, z) == null;
 		original.call(tileChunk, x, z, tile, cache, processor);
-		int chunkX = tile.getChunkX(), chunkZ = tile.getChunkZ();
-		if (AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, chunkX, chunkZ, differs)
-				&& writingLayer == VisitedChunks.SURFACE_LAYER) {
-			VisitedHighlighter.refreshRegion(processor, level.dimension(), chunkX >> 5, chunkZ >> 5);
-		}
+		// The map highlight catches up within a second (VisitedHighlighter.refreshChanged).
+		AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, tile.getChunkX(), tile.getChunkZ(), differs);
 	}
 }

@@ -59,8 +59,15 @@ public final class VisitedChunks {
 	private final Map<String, LongOpenHashSet> changed = new HashMap<>();
 	/** Record key to chunk counts per 512-block region (32 x 32 chunks), for the map highlight. */
 	private final Map<String, Long2IntOpenHashMap> regionCounts = new HashMap<>();
-	/** Record key to a per-region counter bumped on every change, so the map highlight knows to redraw. */
-	private final Map<String, Long2IntOpenHashMap> regionVersions = new HashMap<>();
+	/**
+	 * Record key to a hash per region of everything the map highlight draws there (see {@link #toggleHash}).
+	 * Xaero reloads a region whenever this differs from the hash it saved with the region's image, so it
+	 * depends only on the record's content: the same after a restart, and unchanged by writes that change
+	 * nothing.
+	 */
+	private final Map<String, Long2IntOpenHashMap> regionHashes = new HashMap<>();
+	/** Record key to the regions whose highlight hash changed since {@link #takeChangedRegions}. */
+	private final Map<String, LongOpenHashSet> changedRegions = new HashMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
 	/**
@@ -133,7 +140,6 @@ public final class VisitedChunks {
 		}
 		String key = recordKey(dimension, layer);
 		long pos = ChunkPos.pack(x, z);
-		long region = ChunkPos.pack(x >> 5, z >> 5);
 		if (differs) {
 			lastWrite.computeIfAbsent(key, k -> new Long2LongOpenHashMap()).put(pos, ++writes);
 		}
@@ -144,9 +150,12 @@ public final class VisitedChunks {
 			return false;
 		}
 		if (added) {
-			regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(region, 1);
+			regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(ChunkPos.pack(x >> 5, z >> 5), 1);
+			toggleHash(key, pos, false);
 		}
-		regionVersions.computeIfAbsent(key, k -> new Long2IntOpenHashMap()).addTo(region, 1);
+		if (nowChanged) {
+			toggleHash(key, pos, true);
+		}
 		dirty.add(key);
 		return true;
 	}
@@ -162,10 +171,50 @@ public final class VisitedChunks {
 		return chunks == null ? 0 : chunks.size();
 	}
 
-	/** Bumped whenever a region's part of the record changes. */
-	public synchronized int regionVersion(String key, int regionX, int regionZ) {
-		Long2IntOpenHashMap versions = regionVersions.get(key);
-		return versions == null ? 0 : versions.get(ChunkPos.pack(regionX, regionZ));
+	/** The hash of what the map highlight draws in a region (see {@link #regionHashes}). */
+	public synchronized int regionHash(String key, int regionX, int regionZ) {
+		Long2IntOpenHashMap hashes = regionHashes.get(key);
+		return hashes == null ? 0 : hashes.get(ChunkPos.pack(regionX, regionZ));
+	}
+
+	/** The regions whose highlight changed since the last call, per record key; forgets them. */
+	public synchronized Map<String, LongOpenHashSet> takeChangedRegions() {
+		Map<String, LongOpenHashSet> taken = new HashMap<>(changedRegions);
+		changedRegions.clear();
+		return taken;
+	}
+
+	/**
+	 * Adds or removes (the same thing, as it's an XOR) a recorded chunk, or its "changed" mark, in the
+	 * highlight hashes. A recorded chunk also counts in the neighbouring regions its outline borders on,
+	 * since whether it's recorded decides their edge colour.
+	 */
+	private void toggleHash(String key, long pos, boolean changedMark) {
+		Long2IntOpenHashMap hashes = regionHashes.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
+		LongOpenHashSet regions = changedRegions.computeIfAbsent(key, k -> new LongOpenHashSet());
+		int x = ChunkPos.getX(pos), z = ChunkPos.getZ(pos);
+		long own = ChunkPos.pack(x >> 5, z >> 5);
+		hashes.put(own, hashes.get(own) ^ mix(pos, changedMark ? 1 : 0));
+		regions.add(own);
+		if (changedMark) {
+			return;
+		}
+		for (long neighbour : new long[] {ChunkPos.pack((x - 1) >> 5, z >> 5), ChunkPos.pack((x + 1) >> 5, z >> 5),
+				ChunkPos.pack(x >> 5, (z - 1) >> 5), ChunkPos.pack(x >> 5, (z + 1) >> 5)}) {
+			if (neighbour != own) {
+				hashes.put(neighbour, hashes.get(neighbour) ^ mix(pos, 2));
+				regions.add(neighbour);
+			}
+		}
+	}
+
+	/** A well-spread hash of a chunk position and a small salt (SplitMix64's finaliser). */
+	private static int mix(long pos, int salt) {
+		long h = pos * 0x9E3779B97F4A7C15L + (salt + 1) * 0xC2B2AE3D27D4EB4FL;
+		h = (h ^ (h >>> 30)) * 0xBF58476D1CE4E5B9L;
+		h = (h ^ (h >>> 27)) * 0x94D049BB133111EBL;
+		h ^= h >>> 31;
+		return (int) h ^ (int) (h >>> 32);
 	}
 
 	public synchronized boolean contains(String key, int x, int z) {
@@ -308,7 +357,8 @@ public final class VisitedChunks {
 		records.clear();
 		changed.clear();
 		regionCounts.clear();
-		regionVersions.clear();
+		regionHashes.clear();
+		changedRegions.clear();
 		lastWrite.clear();
 		exports.clear();
 		nextExport = 1;
@@ -376,13 +426,9 @@ public final class VisitedChunks {
 			changed.remove(key);
 			lastWrite.remove(key);
 			dirty.remove(key);
-			// Bump rather than reset the region versions, so the map highlight's hash for every affected
-			// region differs from anything Xaero has cached and it redraws them.
-			Long2IntOpenHashMap counts = regionCounts.remove(key);
-			if (counts != null) {
-				Long2IntOpenHashMap versions = regionVersions.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
-				counts.keySet().forEach(region -> versions.addTo(region, 1));
-			}
+			// With no record, every region's highlight hash is 0 again: callers refresh the whole map.
+			regionCounts.remove(key);
+			regionHashes.remove(key);
 			if (server != null) {
 				try {
 					Files.deleteIfExists(fileFor(key));
@@ -435,20 +481,18 @@ public final class VisitedChunks {
 		LongOpenHashSet changedChunks = changed.get(export.key());
 		Long2LongOpenHashMap written = lastWrite.getOrDefault(export.key(), new Long2LongOpenHashMap());
 		Long2IntOpenHashMap counts = regionCounts.computeIfAbsent(export.key(), k -> new Long2IntOpenHashMap());
-		Long2IntOpenHashMap versions = regionVersions.computeIfAbsent(export.key(), k -> new Long2IntOpenHashMap());
 		int forgotten = 0;
 		for (LongIterator it = export.chunks().iterator(); it.hasNext(); ) {
 			long pos = it.nextLong();
 			if (written.get(pos) > export.writes() || !chunks.remove(pos)) {
 				continue;
 			}
-			if (changedChunks != null) {
-				changedChunks.remove(pos);
+			toggleHash(export.key(), pos, false);
+			if (changedChunks != null && changedChunks.remove(pos)) {
+				toggleHash(export.key(), pos, true);
 			}
 			written.remove(pos);
-			long region = ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5);
-			counts.addTo(region, -1);
-			versions.addTo(region, 1);
+			counts.addTo(ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5), -1);
 			forgotten++;
 		}
 		dirty.add(export.key());
@@ -585,17 +629,14 @@ public final class VisitedChunks {
 		LongOpenHashSet recorded = records.computeIfAbsent(key, k -> new LongOpenHashSet());
 		LongOpenHashSet recordedChanged = changed.computeIfAbsent(key, k -> new LongOpenHashSet());
 		Long2IntOpenHashMap counts = regionCounts.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
-		Long2IntOpenHashMap versions = regionVersions.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
 		for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
 			long pos = it.nextLong();
-			boolean added = recorded.add(pos);
-			boolean nowChanged = changedChunks.contains(pos) && recordedChanged.add(pos);
-			if (added || nowChanged) {
-				long region = ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5);
-				if (added) {
-					counts.addTo(region, 1);
-				}
-				versions.addTo(region, 1);
+			if (recorded.add(pos)) {
+				counts.addTo(ChunkPos.pack(ChunkPos.getX(pos) >> 5, ChunkPos.getZ(pos) >> 5), 1);
+				toggleHash(key, pos, false);
+			}
+			if (changedChunks.contains(pos) && recordedChanged.add(pos)) {
+				toggleHash(key, pos, true);
 			}
 		}
 	}
