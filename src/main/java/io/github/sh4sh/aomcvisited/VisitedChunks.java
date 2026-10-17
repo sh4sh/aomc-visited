@@ -1,5 +1,6 @@
 package io.github.sh4sh.aomcvisited;
 
+import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
@@ -144,13 +145,8 @@ public final class VisitedChunks {
 		}
 	}
 
-	/** A well-spread hash of a chunk position and a small salt (SplitMix64's finaliser). */
 	private static int mix(long pos, int salt) {
-		long h = pos * 0x9E3779B97F4A7C15L + (salt + 1) * 0xC2B2AE3D27D4EB4FL;
-		h = (h ^ (h >>> 30)) * 0xBF58476D1CE4E5B9L;
-		h = (h ^ (h >>> 27)) * 0x94D049BB133111EBL;
-		h ^= h >>> 31;
-		return (int) h ^ (int) (h >>> 32);
+		return Long.hashCode(HashCommon.mix(HashCommon.mix(pos) + salt));
 	}
 
 	public synchronized boolean contains(String key, int x, int z) {

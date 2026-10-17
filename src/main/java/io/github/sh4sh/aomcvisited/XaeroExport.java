@@ -379,11 +379,11 @@ public final class XaeroExport {
 			try {
 				if (job.root == null) {
 					Path mapExports = tiles ? written.getParent() : written;
-					String dimension = job.keys.size() == 1 ? folderName(key) + "-" : "";
+					String dimension = job.keys.size() == 1 ? VisitedChunks.shortName(key) + "-" : "";
 					job.root = mapExports.resolve("aomc-visited-" + dimension + LocalDateTime.now().format(FOLDER_TIME));
 				}
 				if (folder == null) {
-					folder = job.keys.size() == 1 ? job.root : job.root.resolve(folderName(key));
+					folder = job.keys.size() == 1 ? job.root : job.root.resolve(VisitedChunks.shortName(key));
 					Files.createDirectories(folder);
 				}
 				if (tiles) {
@@ -446,7 +446,7 @@ public final class XaeroExport {
 					"/visited uploaded " + number, "Click once " + where() + " has been uploaded: forgets"
 							+ " what it contained, so the next export only has areas mapped since. Works after a"
 							+ " restart too."));
-			String name = job.keys.size() == 1 ? VisitedChunks.shortName(key) : folderName(key) + "/";
+			String name = VisitedChunks.shortName(key) + (job.keys.size() == 1 ? "" : "/");
 			job.line(Component.literal(name + ": " + total.chunksKept() + " chunks (" + changed + " new or changed), "
 					+ left + (left == 1 ? " image" : " images")
 					+ (total.chunksBlackedOut() > 0 ? ", " + total.chunksBlackedOut() + " older chunks blacked out" : "")
@@ -455,7 +455,7 @@ public final class XaeroExport {
 		}
 
 		private String where() {
-			return job.keys.size() == 1 ? "the export" : folderName(key) + "/";
+			return job.keys.size() == 1 ? "the export" : VisitedChunks.shortName(key) + "/";
 		}
 
 		private void fail(Component problem) {
@@ -469,10 +469,6 @@ public final class XaeroExport {
 			job.line(text.withStyle(ChatFormatting.RED));
 			job.nextDimension();
 		}
-	}
-
-	private static String folderName(String key) {
-		return VisitedChunks.shortName(key).replaceAll("[^A-Za-z0-9._-]", "_");
 	}
 
 	private static void deleteIfEmpty(Path folder) {

@@ -114,7 +114,7 @@ public final class ExportAreas {
 	}
 
 	private static long key(int x, int z) {
-		return ((long) x << 32) | (z & 0xFFFFFFFFL);
+		return ((long) x << 32) | Integer.toUnsignedLong(z);
 	}
 
 	private static int x(long key) {
