@@ -68,7 +68,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.then(ClientCommands.literal("all")
 										.executes(context -> clearAll(context.getSource(), false))
 										.then(ClientCommands.literal("confirm").executes(context -> clearAll(context.getSource(), true)))))
-						.then(ClientCommands.literal("restore").executes(context -> restore(context.getSource())))
 						.then(ClientCommands.literal("uploaded")
 								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
@@ -153,27 +152,16 @@ public class AomcVisitedClient implements ClientModInitializer {
 		if (client.player == null || !SETTINGS.enabled()) {
 			return;
 		}
-		String when = ago(System.currentTimeMillis() - VISITED.lastHere());
-		List<VisitedChunks.Earlier> expired = VISITED.expired();
-		if (!expired.isEmpty()) {
-			MutableComponent message = Chat.info("Forgot your map data from " + when + ", since it may be out of date:");
-			for (VisitedChunks.Earlier record : expired) {
-				message.append(Chat.line(VisitedChunks.shortName(record.key()) + ": " + record.chunks() + " chunks"));
-			}
-			Chat.send(client, message.append(Chat.buttons(Chat.button("Restore", ChatFormatting.GOLD,
-					"/visited restore", "May be out of date: only restore it if nobody else has mapped there since."
-							+ " Can be restored until a day after you were last here."))));
-		}
 		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
 		if (earlier.isEmpty()) {
 			return;
 		}
-		MutableComponent message = Chat.info("Map data from " + when + " isn't uploaded yet:");
+		MutableComponent message = Chat.info("Map data from " + ago(System.currentTimeMillis() - VISITED.lastHere())
+				+ " isn't uploaded yet:");
 		for (VisitedChunks.Earlier record : earlier) {
 			message.append(Chat.line(VisitedChunks.shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}
-		message.append(Chat.line("If you keep playing, your next export includes it. It's only forgotten after an"
-				+ " hour offline."));
+		message.append(Chat.line("If you keep playing, your next export includes it."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it now", ChatFormatting.GREEN, "/visited export",
 						"Export it now, or later: it stays in the record either way"),
@@ -192,23 +180,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		long days = hours / 24;
 		return days == 1 ? "a day ago" : days + " days ago";
-	}
-
-	private static int restore(FabricClientCommandSource source) {
-		int restored = VISITED.restoreForgotten();
-		if (restored < 0) {
-			source.sendFeedback(Chat.error("Not connected to a world."));
-			return 0;
-		}
-		if (restored == 0) {
-			source.sendFeedback(Chat.info("Nothing left to restore."));
-			return 1;
-		}
-		if (xaeroInstalled()) {
-			VisitedHighlighter.refreshAll();
-		}
-		source.sendFeedback(Chat.success("Restored " + restored + " chunks. Your next export includes them."));
-		return 1;
 	}
 
 	private static int clearAll(FabricClientCommandSource source, boolean confirm) {

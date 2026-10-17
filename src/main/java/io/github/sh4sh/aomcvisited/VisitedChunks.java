@@ -26,7 +26,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /** Records are keyed by dimension id. Synchronized because the disconnect event may arrive off the main thread. */
@@ -34,7 +33,6 @@ public final class VisitedChunks {
 	private static final String EXPORTS_HEADER = "# AOMC Visited: exports not yet marked as uploaded."
 			+ " 'next <n>' is the next export's number; then one export per line: its number, its record, and the"
 			+ " chunks (x,z) it contained whose map hasn't changed since";
-	private static final int MAX_EXPORTS = 20;
 	private static final String HEADER = "# AOMC Visited: chunks Xaero's World Map wrote, as chunk x,z"
 			+ " (multiply by 16 for block coordinates); x,z,c = new or changed since the player's map had it";
 	/** Xaero's layer number for the normal (not cave-mode) map. */
@@ -57,13 +55,8 @@ public final class VisitedChunks {
 	private int nextExport = 1;
 	private boolean exportsDirty;
 	private List<Earlier> earlier = List.of();
-	private List<Earlier> expired = List.of();
 	private long lastHere;
 
-	/** Time away, by the newest record file: {@link #save} stamps them all, even unchanged ones. */
-	public static final long FORGET_AFTER_MS = 60 * 60 * 1000L;
-	private static final String FORGOTTEN = "forgotten";
-	public static final long KEEP_FORGOTTEN_MS = 24 * 60 * 60 * 1000L;
 
 	public record Earlier(String key, int chunks) {
 	}
@@ -177,12 +170,11 @@ public final class VisitedChunks {
 		server = serverKey;
 		Path dir = root.resolve(server);
 		loadExports(dir.resolve("exports.txt"));
-		List<Earlier> found = new ArrayList<>(), tooOld = new ArrayList<>();
-		long now = System.currentTimeMillis();
+		List<Earlier> found = new ArrayList<>();
 		List<Path> files = new ArrayList<>();
 		for (Path file : recordFiles(dir)) {
 			String key = keyFor(dir, file);
-			if (key == null || key.startsWith(FORGOTTEN + ":")) {
+			if (key == null) {
 				continue;
 			}
 			if (WEBMAP_DIMENSIONS.contains(key)) {
@@ -204,73 +196,24 @@ public final class VisitedChunks {
 			try {
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
-				Earlier record = new Earlier(key, chunks.size());
-				if (now - lastHere > FORGET_AFTER_MS) {
-					Path kept = forgottenFile(key);
-					Files.createDirectories(kept.getParent());
-					Files.move(file, kept, StandardCopyOption.REPLACE_EXISTING);
-					Files.setLastModifiedTime(kept, FileTime.fromMillis(lastHere));
-					if (!chunks.isEmpty()) {
-						tooOld.add(record);
-					}
-					continue;
-				}
 				if (!chunks.isEmpty()) {
-					found.add(record);
+					found.add(new Earlier(key, chunks.size()));
 				}
 				addRecord(key, chunks, changedChunks);
 			} catch (IOException e) {
 				AomcVisitedClient.LOGGER.error("Could not read visited chunks from {}", file, e);
 			}
 		}
-		deleteForgotten(key -> true, now - KEEP_FORGOTTEN_MS);
 		found.sort(Comparator.comparing(Earlier::key));
-		tooOld.sort(Comparator.comparing(Earlier::key));
 		earlier = List.copyOf(found);
-		expired = List.copyOf(tooOld);
 		if (exports.values().removeIf(export -> !records.containsKey(export.key()))) {
 			exportsDirty = true;
 			saveExports();
 		}
 	}
 
-	public synchronized int restoreForgotten() {
-		if (server == null) {
-			return -1;
-		}
-		Path dir = root.resolve(server).resolve(FORGOTTEN);
-		long now = System.currentTimeMillis();
-		int restored = 0;
-		for (Path file : recordFiles(dir)) {
-			String key = keyFor(dir, file);
-			if (key == null) {
-				continue;
-			}
-			try {
-				if (now - Files.getLastModifiedTime(file).toMillis() <= KEEP_FORGOTTEN_MS) {
-					LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
-					load(file, chunks, changedChunks);
-					int before = records.containsKey(key) ? records.get(key).size() : 0;
-					addRecord(key, chunks, changedChunks);
-					restored += records.get(key).size() - before;
-					dirty.add(key);
-				}
-				Files.delete(file);
-			} catch (IOException e) {
-				AomcVisitedClient.LOGGER.error("Could not restore visited chunks from {}", file, e);
-			}
-		}
-		expired = List.of();
-		save();
-		return restored;
-	}
-
 	public synchronized long lastHere() {
 		return lastHere;
-	}
-
-	public synchronized List<Earlier> expired() {
-		return expired;
 	}
 
 	public synchronized List<Earlier> earlier() {
@@ -290,7 +233,6 @@ public final class VisitedChunks {
 		nextExport = 1;
 		exportsDirty = false;
 		earlier = List.of();
-		expired = List.of();
 		dirty.clear();
 	}
 
@@ -342,9 +284,6 @@ public final class VisitedChunks {
 
 	private int clear(String id) {
 		int forgotten = 0;
-		if (server != null) {
-			deleteForgotten(id::equals, Long.MAX_VALUE);
-		}
 		if (exports.values().removeIf(export -> export.key().equals(id))) {
 			exportsDirty = true;
 		}
@@ -373,6 +312,7 @@ public final class VisitedChunks {
 
 	public synchronized int rememberExport(String key, LongOpenHashSet chunks, long writesAtStart) {
 		int number = nextExport++;
+		exports.values().removeIf(export -> export.key().equals(key));
 		exports.put(number, new Export(key, chunks, writesAtStart));
 		exportsDirty = true;
 		save();
@@ -466,7 +406,7 @@ public final class VisitedChunks {
 				out.newLine();
 				out.write("next " + nextExport);
 				out.newLine();
-				for (int number : numbers.subList(0, Math.min(MAX_EXPORTS, numbers.size()))) {
+				for (int number : numbers) {
 					Export export = exports.get(number);
 					LongOpenHashSet recorded = records.getOrDefault(export.key(), new LongOpenHashSet());
 					Long2LongOpenHashMap written = lastWrite.getOrDefault(export.key(), new Long2LongOpenHashMap());
@@ -568,26 +508,6 @@ public final class VisitedChunks {
 		}
 		String path = rel.subpath(1, rel.getNameCount()).toString().replace('\\', '/');
 		return rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
-	}
-
-	private void deleteForgotten(Predicate<String> matches, long before) {
-		Path dir = root.resolve(server).resolve(FORGOTTEN);
-		for (Path file : recordFiles(dir)) {
-			String key = keyFor(dir, file);
-			try {
-				if (key != null && matches.test(key) && Files.getLastModifiedTime(file).toMillis() < before) {
-					Files.delete(file);
-				}
-			} catch (IOException e) {
-				AomcVisitedClient.LOGGER.error("Could not delete {}", file, e);
-			}
-		}
-	}
-
-	private Path forgottenFile(String key) {
-		int colon = key.indexOf(':');
-		return root.resolve(server).resolve(FORGOTTEN).resolve(key.substring(0, colon))
-				.resolve(key.substring(colon + 1) + ".txt");
 	}
 
 	private Path fileFor(String key) {
