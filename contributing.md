@@ -53,3 +53,14 @@ Under `<game dir>/aomc_visited/`:
 - **Bump `version` in `gradle.properties` for every build handed out for testing**, so the jar name and
   Fabric's mod list show which build is installed.
 - `./gradlew runClient` needs a desktop session.
+
+## Branches, CI and releases
+
+- Work on a feature branch and open a pull request; `main` only gets changes that were tested in game.
+  Merging needs the Build check to pass.
+- CI (`.github/workflows/build.yml`) builds every pull request and every push to `main`, and attaches the
+  jar to the run as an artifact. It downloads Xaero's World Map from Modrinth, pinned by checksum: when
+  `xaero_worldmap_version` changes, update the URL and checksum there too.
+- To release, bump `version` in `gradle.properties`, merge, then tag that commit on `main` and push the
+  tag (`git tag v<version>`, `git push origin v<version>`). CI checks the tag matches `version`, builds,
+  and publishes a GitHub release with the jar.
