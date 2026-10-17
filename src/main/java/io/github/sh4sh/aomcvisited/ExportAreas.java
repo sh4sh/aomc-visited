@@ -8,15 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Splits a record into a few compact export rectangles, so far-apart areas (or a long diagonal flight)
- * don't become one huge mostly-empty export. Plain Java with no game classes, so it can be tested
- * outside the game.
- *
- * <p>Works on 512-block regions (32 x 32 chunks): groups of touching regions, each split in half along
- * its longer side while its rectangle is mostly empty, then rectangles that overlap are merged (so no two
- * exports cover the same ground, and image names never collide).
- */
 public final class ExportAreas {
 	/** A rectangle of chunks, inclusive. */
 	public record Box(int minX, int minZ, int maxX, int maxZ) {
@@ -30,15 +21,12 @@ public final class ExportAreas {
 		}
 	}
 
-	/** Keep splitting while less than a third of a group's rectangle has visited regions in it. */
 	private static final int MIN_FILL_DIVISOR = 3;
-	/** Never split a group whose rectangle is this many regions or fewer (2 x 2 = 1024 blocks square). */
 	private static final int SMALL_ENOUGH = 4;
 
 	private ExportAreas() {
 	}
 
-	/** {@code chunks} as {x, z} pairs. Returns the rectangles to export, covering every chunk. */
 	public static List<Box> plan(Iterable<int[]> chunks) {
 		Map<Long, Box> regions = new HashMap<>();
 		for (int[] chunk : chunks) {

@@ -11,12 +11,7 @@ import xaero.map.MapProcessor;
 
 import java.nio.file.Path;
 
-/**
- * Hooks Xaero's export task ({@code MapSaveLoad$1}) for {@code /visited export}: stops it opening a folder
- * after each area (we open the combined folder once at the end), and reports when the task has returned, so
- * the next area isn't started while it's still waiting (see {@code XaeroExport.TASK_END_FALLBACK_MS}). If a
- * Xaero update moves these, an extra folder window opens and areas start a second apart instead.
- */
+/** See {@code XaeroExport.TASK_END_FALLBACK_MS}. We open our own folder at the end. */
 @Mixin(targets = "xaero.map.file.MapSaveLoad$1", remap = false)
 public abstract class XaeroExportTaskMixin {
 	@Inject(method = "run", at = @At("RETURN"))

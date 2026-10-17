@@ -18,27 +18,12 @@ import xaero.map.region.MapBlock;
 import xaero.map.region.MapTile;
 import xaero.map.region.MapTileChunk;
 
-/**
- * Records every chunk Xaero's World Map writes fresh map data for, and whether it differs from what the
- * map had there before.
- *
- * <p>{@code writeChunk} skips chunks that are missing a neighbour or haven't changed since it last wrote
- * them. Otherwise it takes the chunk's existing tile (or a fresh one from its pool for new ground),
- * computes each pixel, compares it with the pixel already there ({@code equalsSlopesExcluded}, ignoring
- * slope shading, which depends on neighbours), overwrites it in place, and finally stores the tile with
- * {@code setTile}. Because the tile is overwritten in place, "did anything differ" can only be learned
- * from those per-pixel comparisons.
- *
- * <p>Not required: if a Xaero update moves these calls, nothing is recorded and exports refuse rather
- * than upload old data.
- */
+/** Xaero overwrites the tile in place, so whether it differs can only be learned pixel by pixel. */
 @Mixin(value = MapWriter.class, remap = false)
 public abstract class XaeroMapWriterMixin {
-	/** The map layer being written: the normal map, or a cave-mode layer. */
 	@Shadow
 	private int writingLayer;
 
-	/** Whether a pixel of the chunk being written differed from what the map had. */
 	@Unique
 	private boolean aomcVisited$differs;
 
@@ -63,7 +48,6 @@ public abstract class XaeroMapWriterMixin {
 		// No tile there yet means Xaero took a fresh one from its pool: ground the map didn't have.
 		boolean differs = aomcVisited$differs || tileChunk.getTile(x, z) == null;
 		original.call(tileChunk, x, z, tile, cache, processor);
-		// The map highlight catches up within a second (VisitedHighlighter.refreshChanged).
 		AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, tile.getChunkX(), tile.getChunkZ(), differs);
 	}
 }

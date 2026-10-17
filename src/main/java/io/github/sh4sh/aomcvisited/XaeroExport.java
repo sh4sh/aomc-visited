@@ -34,58 +34,34 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/**
- * {@code /visited export}: runs Xaero's World Map export by itself for every dimension with recorded
- * ground, wherever the player is. For each dimension it switches Xaero's map to it (as Xaero's own map
- * switching screen does), exports one compact area at a time ({@link ExportAreas}), cleans each result
- * ({@link TileMasker}) into a folder per dimension, and finally switches the map back. Everything that
- * touches Xaero is here and in the mixins; only load this class when
- * {@code xaeroworldmap} is installed.
- */
 public final class XaeroExport {
-	/** Xaero names each export folder after the time it was made, e.g. {@code 2026-10-15_23.52.26}. */
 	private static final Pattern EXPORT_FOLDER = Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}");
-	/** A single-image export: the timestamp, the corner, and {@code _<n>} if Xaero found the name taken. */
 	private static final Pattern SINGLE_IMAGE =
 			Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}_x(-?\\d+)_z(-?\\d+)(?:_\\d+)?\\.png");
 	private static final DateTimeFormatter FOLDER_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss");
 
-	/** A job with no progress for this long counts as dead (each step takes seconds, not minutes). */
 	private static final long STUCK_MS = 5 * 60 * 1000;
 	/**
-	 * Xaero's export task waits on its own thread, checking every 100 ms, until its "exporting" flag clears;
-	 * starting the next area before it has seen that sets the flag again and both tasks wait forever (seen in
-	 * the first two-area test). So the next area starts only once the task has returned
-	 * ({@code XaeroExportTaskMixin} reports it), or after this long if that hook is missing.
+	 * Xaero's task polls until its "exporting" flag clears; starting the next area before it returns sets the
+	 * flag again and both wait forever. Used only if {@code XaeroExportTaskMixin} can't report the return.
 	 */
 	private static final long TASK_END_FALLBACK_MS = 1000;
-	/** How long Xaero may take to switch its map to another dimension. */
 	private static final long SWITCH_TIMEOUT_MS = 30_000;
-	/** Pause after a switch, and between retries while Xaero says its map isn't prepared yet. */
 	private static final long SETTLE_MS = 1000;
 	private static final int NOT_PREPARED_RETRIES = 20;
 
-	/** The running job, if any. */
 	private static volatile Job job;
-	/** When {@link #job} last made progress; see {@link #active()}. */
 	private static volatile long lastProgress;
-	/** Set when Xaero's export task has returned. */
 	private static volatile boolean taskEnded;
 
 	private XaeroExport() {
 	}
 
-	/**
-	 * Whether our export is running. Meanwhile {@code XaeroPNGExporterMixin} hands Xaero's exporter our
-	 * options (the player's own settings are never changed) and {@code XaeroExportTaskMixin} stops Xaero
-	 * opening folders, since we open ours at the end. If Xaero's exporter throws it never reports back, so a
-	 * job without progress for {@link #STUCK_MS} counts as dead and can't keep affecting Xaero's own export.
-	 */
+	/** If Xaero's exporter throws it never reports back, so a stuck job stops counting. */
 	public static boolean active() {
 		return job != null && System.currentTimeMillis() - lastProgress < STUCK_MS;
 	}
 
-	/** Forgets the job when leaving the world (normally there is none), still running its "when done". */
 	static void reset() {
 		Job current = job;
 		job = null;
@@ -94,12 +70,10 @@ public final class XaeroExport {
 		}
 	}
 
-	/** Called by {@code XaeroExportTaskMixin} when Xaero's export task has returned. */
 	public static void taskEnded() {
 		taskEnded = true;
 	}
 
-	/** Called every client tick to move the job along. */
 	static void tick() {
 		Job current = job;
 		if (current != null) {
@@ -107,11 +81,6 @@ public final class XaeroExport {
 		}
 	}
 
-	/**
-	 * Starts exporting every dimension with recorded ground, or only {@code only} (a dimension id) if it isn't
-	 * null. Returns an error for the player, or null if it started; then {@code whenDone} (may be null) runs
-	 * once the export has finished or failed.
-	 */
 	static Component start(Minecraft client, String only, Runnable whenDone) {
 		if (active()) {
 			return Chat.error("An export is already running.");
@@ -133,7 +102,6 @@ public final class XaeroExport {
 					+ " Xaero's World Map may not be supported.");
 		}
 		List<String> names = keys.stream().map(VisitedChunks::shortName).toList();
-		// Only mention switching when Xaero's map will show another dimension than it does now.
 		ResourceKey<Level> showing = processor.getMapWorld().getCurrentDimensionId();
 		boolean switches = keys.size() > 1 || showing == null || !keys.getFirst().equals(showing.identifier().toString());
 		Chat.send(client, Chat.info("Exporting " + String.join(", ", names) + ". Progress shows above your hotbar."
@@ -145,7 +113,6 @@ public final class XaeroExport {
 		return null;
 	}
 
-	/** Every dimension with recorded ground, one after another. */
 	private static final class Job {
 		private enum Stage { SWITCHING, SETTLING, EXPORTING, AREA_DONE, RETRY }
 
@@ -153,9 +120,7 @@ public final class XaeroExport {
 		private final MapProcessor processor;
 		private final List<String> keys;
 		private final Runnable whenDone;
-		/** What Xaero's map was showing before; restored at the end. */
 		private final ResourceKey<Level> previousCustom;
-		/** Xaero's write count at the start: chunks whose map changes later are kept by "mark as uploaded". */
 		private final long writesAtStart = AomcVisitedClient.VISITED.writes();
 		private final MutableComponent report = Component.empty();
 		private final List<Component> buttons = new ArrayList<>();
@@ -186,7 +151,6 @@ public final class XaeroExport {
 			return System.currentTimeMillis() - stageSince;
 		}
 
-		/** Switches Xaero's map to the next dimension, as its map switching screen does. */
 		void startDimension() {
 			if (dimension == keys.size()) {
 				finish();
@@ -230,7 +194,6 @@ public final class XaeroExport {
 					}
 				}
 				case RETRY -> {
-					// Wait a moment for Xaero's map, and as always for its previous task to have returned.
 					if (inStage() > SETTLE_MS && (taskEnded || inStage() > SETTLE_MS + TASK_END_FALLBACK_MS)) {
 						run.exportArea();
 					}
@@ -241,10 +204,6 @@ public final class XaeroExport {
 			}
 		}
 
-		/**
-		 * Keeps the progress above the hotbar (it fades after a few seconds unless sent again). The dots move
-		 * while the game is running; they stop while Xaero's export freezes it.
-		 */
 		private void showProgress() {
 			String name = VisitedChunks.shortName(keys.get(dimension));
 			String of = keys.size() > 1 ? " (" + (dimension + 1) + " of " + keys.size() + ")" : "";
@@ -256,8 +215,7 @@ public final class XaeroExport {
 		}
 
 		private void beginDimensionExport() {
-			// The webmap's main maps (the Nether is mapped on the roof) are made with cave mode off; a cave
-			// mode export would be a separate feature.
+			// The webmap's main maps are made with cave mode off.
 			if (processor.getCurrentCaveLayer() != VisitedChunks.SURFACE_LAYER) {
 				line(red(VisitedChunks.shortName(keys.get(dimension)) + ": Xaero's map is in cave mode there, so it was skipped."
 						+ " Turn cave mode off and export again."));
@@ -276,7 +234,6 @@ public final class XaeroExport {
 			run.exportArea();
 		}
 
-		/** Adds a line to the final report. */
 		void line(Component text) {
 			report.append(Chat.line(text));
 		}
@@ -310,7 +267,6 @@ public final class XaeroExport {
 		}
 	}
 
-	/** One dimension's areas, exported one after another. */
 	private static final class Run {
 		private final Job job;
 		private final String key;
@@ -329,7 +285,6 @@ public final class XaeroExport {
 			this.areas = areas;
 		}
 
-		/** Hands the current area to Xaero, or finishes the dimension. */
 		void exportArea() {
 			if (index == areas.size()) {
 				finishDimension();
@@ -356,15 +311,11 @@ public final class XaeroExport {
 			job.showProgress();
 		}
 
-		/**
-		 * Runs on the main thread inside Xaero's export task. Afterwards Xaero clears its "exporting" flag and
-		 * shows {@code screen}; the job continues once the task has returned (see {@link #TASK_END_FALLBACK_MS}).
-		 */
+		/** Runs inside Xaero's task, which shows {@code screen} afterwards (see {@link #TASK_END_FALLBACK_MS}). */
 		private void done(ExportScreen screen, ExportAreas.Box area, PNGExportResult result) {
 			doneScreen = screen;
 			PNGExportResultType type = result.getType();
 			if (type == PNGExportResultType.NOT_PREPARED && retries < NOT_PREPARED_RETRIES) {
-				// Xaero's map is still settling after the switch: try this area again shortly.
 				retries++;
 				doneProblem = null;
 				job.stage(Job.Stage.RETRY);
@@ -372,7 +323,6 @@ public final class XaeroExport {
 				return;
 			}
 			if (type == PNGExportResultType.EMPTY) {
-				// Nothing Xaero could draw there (e.g. all of it black): nothing to clean.
 				doneProblem = null;
 			} else if (type.isSuccess() && result.getFolderToOpen() != null) {
 				doneProblem = clean(result.getFolderToOpen(), area);
@@ -393,7 +343,6 @@ public final class XaeroExport {
 			});
 		}
 
-		/** Closes the screen Xaero showed, then exports the next area, or reports the problem. */
 		void continueAfterArea() {
 			if (job.client.gui.screen() == doneScreen) {
 				job.client.gui.setScreen(null);
@@ -408,14 +357,11 @@ public final class XaeroExport {
 		}
 
 		/**
-		 * Cleans what Xaero just wrote for one area and moves it into this dimension's folder. With Multiple
-		 * Unscaled Images on (we force it), that's a timestamped folder of tiles, except when the area fits in
-		 * one tile: then it's a single unscaled image straight in {@code map exports}, which Xaero reports as
-		 * the folder. Returns an error, or null.
+		 * {@code written} is a timestamped folder of tiles, or, when the area fits in one tile, {@code map
+		 * exports} itself with a single image in it. Returns an error, or null.
 		 */
 		private Component clean(Path written, ExportAreas.Box area) {
-			// Take the record now: Xaero keeps mapping meanwhile, and its writer runs on this thread, so this
-			// is exactly what the export just rendered.
+			// Xaero's writer runs on this thread, so this is exactly what the export rendered.
 			LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
 			for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
 				long pos = it.nextLong();
@@ -430,12 +376,10 @@ public final class XaeroExport {
 			try {
 				if (job.root == null) {
 					Path mapExports = tiles ? written.getParent() : written;
-					// A one-dimension export has no subfolders, so its name says which map it's for.
 					String dimension = job.keys.size() == 1 ? folderName(key) + "-" : "";
 					job.root = mapExports.resolve("aomc-visited-" + dimension + LocalDateTime.now().format(FOLDER_TIME));
 				}
 				if (folder == null) {
-					// One dimension needs no folder of its own.
 					folder = job.keys.size() == 1 ? job.root : job.root.resolve(folderName(key));
 					Files.createDirectories(folder);
 				}
@@ -507,7 +451,6 @@ public final class XaeroExport {
 			job.nextDimension();
 		}
 
-		/** The folder this dimension's images go in, for messages. */
 		private String where() {
 			return job.keys.size() == 1 ? "the export" : folderName(key) + "/";
 		}
@@ -539,7 +482,6 @@ public final class XaeroExport {
 		}
 	}
 
-	/** The newest single-image export in {@code folder} whose name ends in this corner. */
 	private static Path findSingleImage(Path folder, int blockX, int blockZ) throws IOException {
 		try (Stream<Path> files = Files.list(folder)) {
 			return files.filter(p -> {
@@ -549,11 +491,6 @@ public final class XaeroExport {
 		}
 	}
 
-	/**
-	 * Renames a half-cleaned export so nobody uploads it by mistake: a timestamped tile folder gets
-	 * {@code -NOT-CLEANED}, a single image gets {@code .NOT-CLEANED} after {@code .png} (so it no longer
-	 * looks like an image). Never touches {@code map exports} itself. Returns where it is now, for the player.
-	 */
 	private static String markNotCleaned(Path written) {
 		String name = written.getFileName().toString();
 		Path marked;

@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-/** The player's settings, in {@code <game dir>/aomc_visited/settings.properties}. */
 public final class Settings {
 	private final Path file;
 	private boolean showOnMap = true;
@@ -25,7 +24,6 @@ public final class Settings {
 		}
 	}
 
-	/** Whether the record is highlighted on Xaero's World Map. */
 	public synchronized boolean showOnMap() {
 		return showOnMap;
 	}

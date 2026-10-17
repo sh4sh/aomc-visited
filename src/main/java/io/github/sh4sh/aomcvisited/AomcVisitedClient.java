@@ -26,7 +26,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 	public static final String MOD_ID = "aomc_visited";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-	/** Save every minute while playing, so a crash loses little (only records that changed are written). */
 	private static final int AUTOSAVE_TICKS = 60 * 20;
 
 	public static final VisitedChunks VISITED =
@@ -37,12 +36,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 	private int ticksSinceSave;
 	/** The export starts a tick after the command, once the chat screen has closed. */
 	private boolean exportNextTick;
-	/** The dimension to export then, or null for every dimension with recorded ground. */
 	private String exportOnly;
-	/** Ticks until the reminder about earlier ground, after joining; 0 when there's none to show. */
 	private int reminderTicks;
 
-	/** Wait a few seconds after joining, so the reminder isn't lost among the server's join messages. */
 	private static final int REMINDER_DELAY_TICKS = 5 * 20;
 
 	@Override
@@ -111,7 +107,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 	}
 
-	/** {@code /visited}: how many chunks each record holds. */
 	private static int showCounts(FabricClientCommandSource source) {
 		String server = VISITED.server();
 		if (server == null) {
@@ -129,11 +124,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/**
-	 * {@code /visited clear [confirm]}: forgets the record for the player's dimension. Without
-	 * {@code confirm} it only says what would be cleared, with a [Confirm] button, since a record can't be
-	 * rebuilt. (Fabric runs client commands clicked in chat locally, like typed ones.)
-	 */
 	private static int clear(FabricClientCommandSource source, boolean confirm) {
 		if (VISITED.server() == null || source.getClient().level == null) {
 			source.sendFeedback(Chat.error("Not connected to a world."));
@@ -157,12 +147,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/**
-	 * Shortly after joining: say if ground from an earlier session was forgotten for being too old (see
-	 * {@link VisitedChunks#FORGET_AFTER_MS}), and if more recent ground is still recorded (the game crashed,
-	 * the player left before uploading, or just what Xaero mapped after the last export), with how old it is
-	 * and buttons to export it or start over.
-	 */
 	private static void remindOfEarlierGround(Minecraft client) {
 		if (client.player == null) {
 			return;
@@ -210,7 +194,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return days == 1 ? "a day ago" : days + " days ago";
 	}
 
-	/** {@code /visited restore}: puts back the ground forgotten on joining for being old. */
 	private static int restore(FabricClientCommandSource source) {
 		int restored = VISITED.restoreForgotten();
 		if (restored < 0) {
@@ -228,7 +211,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/** {@code /visited clear all [confirm]}: like {@link #clear}, for every dimension on this server. */
 	private static int clearAll(FabricClientCommandSource source, boolean confirm) {
 		if (VISITED.server() == null) {
 			source.sendFeedback(Chat.error("Not connected to a world."));
@@ -251,10 +233,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/**
-	 * {@code /visited uploaded [<export>]}: the [Mark as uploaded] button runs it with the export's number;
-	 * typed without one, it marks the latest export.
-	 */
 	private static int markUploaded(FabricClientCommandSource source, int export) {
 		if (export < 0) {
 			source.sendFeedback(Chat.error("There's no export to mark as uploaded. To start over, use /visited"
@@ -275,7 +253,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/** {@code /visited show [on|off]}: the highlight on Xaero's World Map; without on/off it switches. */
 	private static int setShow(FabricClientCommandSource source, boolean show) {
 		SETTINGS.setShowOnMap(show);
 		if (xaeroInstalled()) {
@@ -287,10 +264,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/**
-	 * {@code /visited export [<dimension>] [anyway|without-packs]}: {@code only} is the dimension's id, or null
-	 * for every dimension with recorded ground.
-	 */
 	private <S extends com.mojang.brigadier.builder.ArgumentBuilder<FabricClientCommandSource, S>> S exportCommand(
 			S command, String only) {
 		return command.executes(context -> requestExport(context.getSource(), only, false))
@@ -298,18 +271,12 @@ public class AomcVisitedClient implements ClientModInitializer {
 				.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource(), only)));
 	}
 
-	/**
-	 * {@code /visited export [anyway]}: starts the export on the next tick (see {@link #exportNextTick}).
-	 * Xaero colours its map from block textures, so a resource pack changes the exported colours; unless
-	 * {@code anyway}, refuse while one of the player's own packs is on.
-	 */
 	private int requestExport(FabricClientCommandSource source, String only, boolean anyway) {
 		if (!xaeroInstalled()) {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
 		}
-		// The player's own packs have ids like "file/<name>"; built-in and mod packs don't. Pack names can
-		// contain colour codes (a tester's turned the rest of the message black), so strip them.
+		// The player's own packs are "file/<name>"; their names can contain colour codes.
 		List<String> packs = source.getClient().getResourcePackRepository().getSelectedIds().stream()
 				.filter(id -> id.startsWith("file/"))
 				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
@@ -330,12 +297,6 @@ public class AomcVisitedClient implements ClientModInitializer {
 		return 1;
 	}
 
-	/**
-	 * {@code /visited export without-packs}: turns the player's own resource packs off, reloads, exports, then
-	 * turns them back on in the same order and reloads again. Minecraft's settings aren't saved meanwhile,
-	 * so if the game stops mid-way the packs are simply on again next launch. Xaero recalculates its block
-	 * colours after a reload (it clears its colour cache when the textures are re-stitched).
-	 */
 	private static int exportWithoutPacks(FabricClientCommandSource source, String only) {
 		if (!xaeroInstalled()) {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));

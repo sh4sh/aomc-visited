@@ -8,11 +8,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import xaero.map.WorldMapSession;
 import xaero.map.highlight.HighlighterRegistry;
 
-/**
- * Adds our map highlight. Xaero builds a highlighter registry for each world session, lets supported mods
- * register (Open Parties and Claims), then locks it with {@code end()}; there's no public hook, so we
- * register just before that.
- */
+/** Xaero locks its highlighter registry with {@code end()} and has no public hook. */
 @Mixin(value = WorldMapSession.class, remap = false)
 public abstract class XaeroWorldMapSessionMixin {
 	@WrapOperation(method = "init", at = @At(value = "INVOKE", target = "Lxaero/map/highlight/HighlighterRegistry;end()V"))

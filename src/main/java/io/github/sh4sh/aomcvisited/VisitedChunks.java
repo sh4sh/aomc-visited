@@ -30,23 +30,13 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
- * The chunks Xaero's World Map has written since the record was last cleared or marked as uploaded, per
- * server, dimension and map layer: the ground the player's Xaero map has fresh data for. {@code XaeroMapWriterMixin} reports each write. The record is kept across sessions,
- * and so are exports not yet marked as uploaded ({@code exports.txt}).
- *
- * <p>Records are keyed like {@code minecraft:overworld} for the normal map, or
- * {@code minecraft:overworld/cave_<layer>} for one of Xaero's cave-mode layers, since an export covers one
- * layer. Chunks whose map data differed from what the player's map had before (new ground, or something
- * changed) are marked "changed". Stored as text under
- * {@code <game dir>/aomc_visited/<server>/<namespace>/<path>.txt}, one {@code x,z} chunk coordinate per
- * line, {@code x,z,c} for changed chunks. Methods are synchronized because the disconnect event may arrive
- * off the main thread.
+ * Records are keyed {@code minecraft:overworld}, or {@code minecraft:overworld/cave_<layer>} for a cave-mode
+ * layer. Synchronized because the disconnect event may arrive off the main thread.
  */
 public final class VisitedChunks {
 	private static final String EXPORTS_HEADER = "# AOMC Visited: exports not yet marked as uploaded."
 			+ " 'next <n>' is the next export's number; then one export per line: its number, its record, and the"
 			+ " chunks (x,z) it contained whose map hasn't changed since";
-	/** Exports never marked as uploaded are forgotten after this many newer ones. */
 	private static final int MAX_EXPORTS = 20;
 	private static final String HEADER = "# AOMC Visited: chunks Xaero's World Map wrote, as chunk x,z"
 			+ " (multiply by 16 for block coordinates); x,z,c = new or changed since the player's map had it";
@@ -54,71 +44,36 @@ public final class VisitedChunks {
 	public static final int SURFACE_LAYER = Integer.MAX_VALUE;
 
 	private final Path root;
-	/** Folder name of the current server, or null when not connected. */
 	private String server;
-	/** Record key (see the class comment) to packed chunk positions. */
 	private final Map<String, LongOpenHashSet> records = new TreeMap<>();
-	/** Record key to the recorded chunks that were new or changed. */
 	private final Map<String, LongOpenHashSet> changed = new HashMap<>();
-	/** Record key to chunk counts per 512-block region (32 x 32 chunks), for the map highlight. */
 	private final Map<String, Long2IntOpenHashMap> regionCounts = new HashMap<>();
-	/**
-	 * Record key to a hash per region of everything the map highlight draws there (see {@link #toggleHash}).
-	 * Xaero reloads a region whenever this differs from the hash it saved with the region's image, so it
-	 * depends only on the record's content: the same after a restart, and unchanged by writes that change
-	 * nothing.
-	 */
+	/** Xaero reloads a region whenever its hash changes, so this depends only on what's drawn there. */
 	private final Map<String, Long2IntOpenHashMap> regionHashes = new HashMap<>();
-	/** Record key to the regions whose highlight hash changed since {@link #takeChangedRegions}. */
 	private final Map<String, LongOpenHashSet> changedRegions = new HashMap<>();
 	private final Set<String> dirty = new HashSet<>();
 
-	/**
-	 * Counts Xaero's writes this session that changed the map, so we can tell what changed after an export.
-	 * Writes that leave a chunk's map as it was don't count: Xaero rewrites the chunks around the player
-	 * every so often even when nothing changed (an export of 289 chunks around a player standing still was
-	 * marked as uploaded and forgot 0 of them, October 2026).
-	 */
+	/** Only writes that change the map count: Xaero keeps rewriting unchanged chunks around the player. */
 	private long writes;
-	/** Record key to each chunk's latest write this session that changed it ({@link #writes} at the time). */
 	private final Map<String, Long2LongOpenHashMap> lastWrite = new HashMap<>();
-	/** Exports that can still be marked as uploaded, by number. */
 	private final Map<Integer, Export> exports = new HashMap<>();
 	private int nextExport = 1;
 	private boolean exportsDirty;
-	/** The normal-map records found on disk when the server was opened: ground mapped in earlier sessions. */
 	private List<Earlier> earlier = List.of();
-	/** The normal-map records forgotten when the server was opened, for being too old. */
 	private List<Earlier> expired = List.of();
-	/** When the player was last on the server before joining, by the record files' times (0 if unknown). */
 	private long lastHere;
 
-	/**
-	 * Records are forgotten when joining if the player was away longer than this. Keeping the record across
-	 * sessions is for a crash or a short break; older ground may be out of date, and the webmap can't tell
-	 * (sh4sh, October 2026). Only time away counts, the same for every dimension: {@link #save} stamps every
-	 * record file with the time, and on joining the newest stamp says when the player was last here.
-	 */
+	/** Time away, by the newest record file: {@link #save} stamps them all, even unchanged ones. */
 	public static final long FORGET_AFTER_MS = 60 * 60 * 1000L;
-	/**
-	 * Forgotten records are kept in this folder (under the server's), so the player can restore them, until
-	 * this long after the player was last here (sh4sh, October 2026).
-	 */
 	private static final String FORGOTTEN = "forgotten";
 	public static final long KEEP_FORGOTTEN_MS = 24 * 60 * 60 * 1000L;
-	/**
-	 * Exists while the player is on the server; deleted when they leave or the game stops normally. Found on
-	 * joining, it means the game crashed last time: then nothing up to {@link #KEEP_FORGOTTEN_MS} old is
-	 * forgotten, since a crash loop can easily last an hour (sh4sh, October 2026).
-	 */
+	/** Exists while on the server, so finding it on joining means the game crashed. */
 	private static final String PLAYING_MARKER = "playing";
 	private boolean crashedLastTime;
 
-	/** A record from an earlier session: its key and chunk count. */
 	public record Earlier(String key, int chunks) {
 	}
 
-	/** What an export contained: a record's chunks, and {@link #writes} when it was made. */
 	private record Export(String key, LongOpenHashSet chunks, long writes) {
 	}
 
@@ -126,29 +81,19 @@ public final class VisitedChunks {
 		this.root = root;
 	}
 
-	/**
-	 * The dimensions the webmap has. Others, like AOMC's creative dimension, are neither recorded nor
-	 * exported (sh4sh, October 2026).
-	 */
 	private static final Set<String> WEBMAP_DIMENSIONS =
 			Set.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end");
 
-	/** Whether a record key belongs to a dimension the webmap has. */
 	private static boolean onWebmap(String key) {
 		int slash = key.indexOf('/');
 		return WEBMAP_DIMENSIONS.contains(slash < 0 ? key : key.substring(0, slash));
 	}
 
-	/** The record key for a dimension and Xaero map layer. */
 	public static String recordKey(ResourceKey<Level> dimension, int layer) {
 		String id = dimension.identifier().toString();
 		return layer == SURFACE_LAYER ? id : id + "/cave_" + layer;
 	}
 
-	/**
-	 * Called after Xaero writes fresh map data for a chunk; {@code differs} says whether it differs from what
-	 * the map had there. Returns whether the record changed (new chunk, or newly marked changed).
-	 */
 	public synchronized boolean mapped(ResourceKey<Level> dimension, int layer, int x, int z, boolean differs) {
 		if (server == null) {
 			Minecraft client = Minecraft.getInstance();
@@ -187,24 +132,18 @@ public final class VisitedChunks {
 		return chunks != null && chunks.contains(ChunkPos.pack(x, z));
 	}
 
-	/** The hash of what the map highlight draws in a region (see {@link #regionHashes}). */
 	public synchronized int regionHash(String key, int regionX, int regionZ) {
 		Long2IntOpenHashMap hashes = regionHashes.get(key);
 		return hashes == null ? 0 : hashes.get(ChunkPos.pack(regionX, regionZ));
 	}
 
-	/** The regions whose highlight changed since the last call, per record key; forgets them. */
 	public synchronized Map<String, LongOpenHashSet> takeChangedRegions() {
 		Map<String, LongOpenHashSet> taken = new HashMap<>(changedRegions);
 		changedRegions.clear();
 		return taken;
 	}
 
-	/**
-	 * Adds or removes (the same thing, as it's an XOR) a recorded chunk, or its "changed" mark, in the
-	 * highlight hashes. A recorded chunk also counts in the neighbouring regions its outline borders on,
-	 * since whether it's recorded decides their edge colour.
-	 */
+	/** Adds or removes (XOR) a chunk; also in neighbouring regions, whose outline depends on it. */
 	private void toggleHash(String key, long pos, boolean changedMark) {
 		Long2IntOpenHashMap hashes = regionHashes.computeIfAbsent(key, k -> new Long2IntOpenHashMap());
 		LongOpenHashSet regions = changedRegions.computeIfAbsent(key, k -> new LongOpenHashSet());
@@ -238,13 +177,11 @@ public final class VisitedChunks {
 		return chunks != null && chunks.contains(ChunkPos.pack(x, z));
 	}
 
-	/** Recorded chunks in a 512-block region (region coordinates are chunk coordinates {@code >> 5}). */
 	public synchronized int regionCount(String key, int regionX, int regionZ) {
 		Long2IntOpenHashMap counts = regionCounts.get(key);
 		return counts == null ? 0 : counts.get(ChunkPos.pack(regionX, regionZ));
 	}
 
-	/** Switches to the given server's record, loading it from disk. */
 	public synchronized void open(String serverKey) {
 		if (serverKey.equals(server)) {
 			return;
@@ -273,11 +210,9 @@ public final class VisitedChunks {
 			if (onWebmap(key)) {
 				files.add(file);
 			} else {
-				// Recorded by a version before 0.2.14, which also recorded other dimensions.
 				deleteQuietly(file);
 			}
 		}
-		// Every record file is stamped on each save, so the newest stamp is when the player was last here.
 		lastHere = 0;
 		for (Path file : files) {
 			try {
@@ -293,8 +228,6 @@ public final class VisitedChunks {
 				load(file, chunks, changedChunks);
 				Earlier record = new Earlier(key, chunks.size());
 				if (now - lastHere > forgetAfter) {
-					// Kept a while in case the player wants it back (see restoreForgotten); the file's time says
-					// when the player was last here.
 					Path kept = forgottenFile(key);
 					Files.createDirectories(kept.getParent());
 					Files.move(file, kept, StandardCopyOption.REPLACE_EXISTING);
@@ -323,11 +256,6 @@ public final class VisitedChunks {
 		}
 	}
 
-	/**
-	 * Puts back the records forgotten for being old, if the player was last here less than
-	 * {@link #KEEP_FORGOTTEN_MS} ago, adding them to whatever was mapped since. Returns how many chunks
-	 * were added, or -1 when not connected.
-	 */
 	public synchronized int restoreForgotten() {
 		if (server == null) {
 			return -1;
@@ -359,30 +287,22 @@ public final class VisitedChunks {
 		return restored;
 	}
 
-	/** Whether the game didn't close normally the last time the player was on this server. */
 	public synchronized boolean crashedLastTime() {
 		return crashedLastTime;
 	}
 
-	/** When the player was last on this server before joining, or 0 if unknown. */
 	public synchronized long lastHere() {
 		return lastHere;
 	}
 
-	/** The records forgotten when joining for being older than {@link #FORGET_AFTER_MS}. */
 	public synchronized List<Earlier> expired() {
 		return expired;
 	}
 
-	/**
-	 * The ground mapped in earlier sessions that was still recorded when joining (not marked as uploaded or
-	 * cleared), for the reminder on joining. Empty once it's all been cleared.
-	 */
 	public synchronized List<Earlier> earlier() {
 		return earlier.stream().filter(record -> records.containsKey(record.key())).toList();
 	}
 
-	/** Saves and forgets the current server's record. */
 	public synchronized void close() {
 		save();
 		if (server != null) {
@@ -408,10 +328,6 @@ public final class VisitedChunks {
 		dirty.clear();
 	}
 
-	/**
-	 * Writes the records that changed since the last save, and stamps every record file with the time, so
-	 * that on joining, a record's age is the time the player was away (see {@link #FORGET_AFTER_MS}).
-	 */
 	public synchronized void save() {
 		if (server == null) {
 			return;
@@ -445,15 +361,10 @@ public final class VisitedChunks {
 		return server;
 	}
 
-	/**
-	 * Forgets a dimension's records (the normal map and any cave layers), in memory and on disk. Returns how
-	 * many chunks were forgotten.
-	 */
 	public synchronized int clear(ResourceKey<Level> dimension) {
 		return clear(dimension.identifier().toString());
 	}
 
-	/** Forgets every record on this server: all dimensions and layers. Returns how many chunks were forgotten. */
 	public synchronized int clearAll() {
 		Set<String> dimensions = new HashSet<>();
 		records.keySet().forEach(key -> dimensions.add(key.split("/", 2)[0]));
@@ -494,16 +405,10 @@ public final class VisitedChunks {
 		return forgotten;
 	}
 
-	/** How many writes that changed the map Xaero has made this session; pass to {@link #rememberExport}. */
 	public synchronized long writes() {
 		return writes;
 	}
 
-	/**
-	 * Remembers what an export contained, so it can be marked as uploaded later (also after a restart);
-	 * chunks whose map changed after {@code writesAtStart} are newer than the export and won't be forgotten. Returns its
-	 * number for {@link #markUploaded}.
-	 */
 	public synchronized int rememberExport(String key, LongOpenHashSet chunks, long writesAtStart) {
 		int number = nextExport++;
 		exports.put(number, new Export(key, chunks, writesAtStart));
@@ -512,16 +417,10 @@ public final class VisitedChunks {
 		return number;
 	}
 
-	/** The latest export that can still be marked as uploaded, or -1. */
 	public synchronized int latestExport() {
 		return exports.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1);
 	}
 
-	/**
-	 * Forgets the chunks an export contained, except those whose map Xaero has changed since (they hold newer
-	 * data than what was uploaded). Returns how many were forgotten, or -1 if there's no such export
-	 * (unknown number, already marked, or the record was cleared since).
-	 */
 	public synchronized int markUploaded(int number) {
 		Export export = exports.remove(number);
 		if (export == null || server == null) {
@@ -554,20 +453,17 @@ public final class VisitedChunks {
 		return forgotten;
 	}
 
-	/** The normal-map (not cave layer) records that have chunks, e.g. {@code minecraft:overworld}. */
 	public synchronized List<String> surfaceKeys() {
 		return records.entrySet().stream()
 				.filter(record -> !record.getKey().contains("/") && !record.getValue().isEmpty())
 				.map(Map.Entry::getKey).toList();
 	}
 
-	/** A copy of one record (empty if there is none). */
 	public synchronized LongOpenHashSet snapshot(String key) {
 		LongOpenHashSet chunks = records.get(key);
 		return chunks == null ? new LongOpenHashSet() : new LongOpenHashSet(chunks);
 	}
 
-	/** How many chunks a dimension's records hold (the normal map and any cave layers). */
 	public synchronized int count(ResourceKey<Level> dimension) {
 		String id = dimension.identifier().toString();
 		int total = 0;
@@ -579,16 +475,12 @@ public final class VisitedChunks {
 		return total;
 	}
 
-	/** Chunk counts per record for the current server. */
 	public synchronized Map<String, Integer> counts() {
 		Map<String, Integer> counts = new TreeMap<>();
 		records.forEach((key, chunks) -> counts.put(key, chunks.size()));
 		return counts;
 	}
 
-	/**
-	 * A folder name for the server: its address for multiplayer, the world's folder for single-player.
-	 */
 	public static String serverKey(Minecraft client) {
 		if (client.isLocalServer() && client.getSingleplayerServer() != null) {
 			Path world = client.getSingleplayerServer().getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
@@ -602,11 +494,7 @@ public final class VisitedChunks {
 		return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
 	}
 
-	/**
-	 * Saves the exports not yet marked as uploaded. Write counts restart with the game, so instead of the
-	 * count each export is saved without the chunks whose map changed since it was made; after loading, any
-	 * write counts as newer (see {@link #loadExports}).
-	 */
+	/** Write counts restart with the game, so chunks changed since each export are left out instead. */
 	private void saveExports() {
 		Path file = root.resolve(server).resolve("exports.txt");
 		try {
@@ -645,7 +533,6 @@ public final class VisitedChunks {
 		}
 	}
 
-	/** Loads saved exports with a write count of 0: every write from now on is newer than them. */
 	private void loadExports(Path file) {
 		if (!Files.isRegularFile(file)) {
 			return;
@@ -678,7 +565,6 @@ public final class VisitedChunks {
 		}
 	}
 
-	/** Adds chunks to a record (creating it if needed), keeping the counts for the map highlight up to date. */
 	private void addRecord(String key, LongOpenHashSet chunks, LongOpenHashSet changedChunks) {
 		LongOpenHashSet recorded = records.computeIfAbsent(key, k -> new LongOpenHashSet());
 		LongOpenHashSet recordedChanged = changed.computeIfAbsent(key, k -> new LongOpenHashSet());
@@ -716,12 +602,10 @@ public final class VisitedChunks {
 		}
 	}
 
-	/** {@code minecraft:the_nether} -> {@code the_nether}; other namespaces keep theirs. */
 	public static String shortName(String key) {
 		return key.startsWith("minecraft:") ? key.substring("minecraft:".length()) : key;
 	}
 
-	/** {@code <dir>/minecraft/overworld/cave_5.txt} -> {@code minecraft:overworld/cave_5}; null for other files. */
 	private static String keyFor(Path dir, Path file) {
 		Path rel = dir.relativize(file);
 		if (rel.getNameCount() < 2) {
@@ -731,7 +615,6 @@ public final class VisitedChunks {
 		return rel.getName(0) + ":" + path.substring(0, path.length() - ".txt".length());
 	}
 
-	/** Deletes the forgotten records whose key matches, if the player was last here before {@code before}. */
 	private void deleteForgotten(Predicate<String> matches, long before) {
 		Path dir = root.resolve(server).resolve(FORGOTTEN);
 		for (Path file : recordFiles(dir)) {
@@ -752,7 +635,6 @@ public final class VisitedChunks {
 				.resolve(key.substring(colon + 1) + ".txt");
 	}
 
-	/** {@code minecraft:overworld/cave_5} is stored as {@code minecraft/overworld/cave_5.txt}. */
 	private Path fileFor(String key) {
 		int colon = key.indexOf(':');
 		return root.resolve(server).resolve(key.substring(0, colon)).resolve(key.substring(colon + 1) + ".txt");
@@ -777,7 +659,6 @@ public final class VisitedChunks {
 		}
 	}
 
-	/** Writes to a temporary file first, so a crash mid-write can't destroy the old record. */
 	private static void write(Path file, LongOpenHashSet chunks, LongOpenHashSet changedChunks) throws IOException {
 		Files.createDirectories(file.getParent());
 		Path tmp = file.resolveSibling(file.getFileName() + ".tmp");

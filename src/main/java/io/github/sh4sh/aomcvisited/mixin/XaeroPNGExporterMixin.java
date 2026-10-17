@@ -10,11 +10,7 @@ import xaero.lib.common.config.single.SingleConfigManager;
 import xaero.map.config.primary.option.WorldMapPrimaryClientConfigOptions;
 import xaero.map.file.export.PNGExporter;
 
-/**
- * Hands Xaero's exporter the options {@code /visited export} needs while it runs, instead of changing the
- * player's settings: Multiple Unscaled Images on (so the export can be cleaned chunk by chunk), Nighttime
- * off, Include Active Highlights off (our tint must never be uploaded). Lighting stays the player's.
- */
+/** Forces our export's options without changing the player's settings. */
 @Mixin(value = PNGExporter.class, remap = false)
 public abstract class XaeroPNGExporterMixin {
 	@WrapOperation(method = "export", at = @At(value = "INVOKE", target = "Lxaero/lib/common/config/single/SingleConfigManager;getEffective(Lxaero/lib/common/config/option/ConfigOption;)Ljava/lang/Object;"))

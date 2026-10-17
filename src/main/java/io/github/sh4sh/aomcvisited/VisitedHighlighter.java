@@ -18,19 +18,6 @@ import xaero.map.world.MapDimension;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Shows the next export on Xaero's World Map (and its minimap): new or changed ground is filled green,
- * and a green outline runs around everything the export keeps, including unchanged ground (which is
- * exported too, but has no fill). Two shades of fill were tried first and were hard to tell apart.
- * Registered by {@code XaeroWorldMapSessionMixin}; only load this class when {@code xaeroworldmap} is
- * installed.
- *
- * <p>Xaero caches highlights per 512-block region by {@link #calculateRegionHash}, so whenever what we'd
- * show changes we clear that cache ({@link #refreshChanged}, {@link #refreshAll}). Xaero reloads a region
- * whose hash differs from the one saved with its image, which slows the world map down while it catches
- * up, so the hash only changes when the highlight does: it's 0 where nothing is drawn, and otherwise a
- * hash of the region's record that stays the same across restarts ({@code VisitedChunks.regionHashes}).
- */
 public final class VisitedHighlighter extends ChunkHighlighter {
 	/** Colours are 0xRRGGBBAA, as in Xaero's claims highlighter. */
 	private static final int CHANGED = 0x40FF4060;
@@ -39,11 +26,7 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 	private static final Component CHANGED_TOOLTIP = Component.literal("New or changed: will be exported");
 	private static final Component UNCHANGED_TOOLTIP = Component.literal("Unchanged since you last mapped it: will be exported");
 
-	/**
-	 * While an export screen is open (ours or Xaero's own) nothing is shown: with "Include Active
-	 * Highlights" on, Xaero would otherwise paint our tint into the exported tiles, inside exactly the
-	 * chunks the cleaner keeps.
-	 */
+	/** Xaero's "Include Active Highlights" would bake our tint into exactly the chunks we keep. */
 	private static volatile boolean exportScreenOpen;
 
 	private VisitedHighlighter() {
@@ -54,11 +37,9 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 		registry.register(new VisitedHighlighter());
 	}
 
-	/** Hides the highlight while an export screen is open. Call once at startup. */
 	static void registerEvents() {
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
-			// Not for our own export, which turns highlights off in Xaero's exporter instead: hiding them
-			// would make Xaero reload every recorded region afterwards.
+			// Our own export turns highlights off in the exporter: hiding them would make Xaero reload every region.
 			if (screen instanceof ExportScreen && !XaeroExport.active()) {
 				exportScreenOpen = true;
 				refreshAll();
@@ -70,7 +51,6 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 		});
 	}
 
-	/** Redraws every highlight, e.g. after {@code /visited show on|off}. */
 	static void refreshAll() {
 		MapProcessor processor = processor();
 		if (processor != null && processor.getMapWorld() != null) {
@@ -78,10 +58,7 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 		}
 	}
 
-	/**
-	 * Redraws the regions whose highlight changed since the last call. Called about once a second rather
-	 * than on every recorded chunk, so a flight doesn't keep restarting Xaero's redraw of the same region.
-	 */
+	/** Called once a second, not per chunk, so a flight doesn't keep restarting Xaero's redraw. */
 	static void refreshChanged() {
 		Map<String, LongOpenHashSet> changed = AomcVisitedClient.VISITED.takeChangedRegions();
 		MapProcessor processor = processor();
@@ -110,7 +87,6 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 		return !exportScreenOpen && AomcVisitedClient.SETTINGS.showOnMap();
 	}
 
-	/** Exports are made with cave mode off, so only the normal map's record is shown. */
 	private static String key(ResourceKey<Level> dimension) {
 		return VisitedChunks.recordKey(dimension, VisitedChunks.SURFACE_LAYER);
 	}
