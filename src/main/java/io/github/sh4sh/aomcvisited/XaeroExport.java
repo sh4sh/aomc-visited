@@ -108,10 +108,11 @@ public final class XaeroExport {
 	}
 
 	/**
-	 * Starts exporting every dimension with recorded ground. Returns an error for the player, or null if it
-	 * started; then {@code whenDone} (may be null) runs once the export has finished or failed.
+	 * Starts exporting every dimension with recorded ground, or only {@code only} (a dimension id) if it isn't
+	 * null. Returns an error for the player, or null if it started; then {@code whenDone} (may be null) runs
+	 * once the export has finished or failed.
 	 */
-	static Component start(Minecraft client, Runnable whenDone) {
+	static Component start(Minecraft client, String only, Runnable whenDone) {
 		if (active()) {
 			return Chat.error("An export is already running.");
 		}
@@ -121,6 +122,12 @@ public final class XaeroExport {
 			return Chat.error("Xaero's World Map isn't ready yet. Open the world map once, then try again.");
 		}
 		List<String> keys = AomcVisitedClient.VISITED.surfaceKeys();
+		if (only != null) {
+			if (!keys.contains(only)) {
+				return Chat.error("Nothing recorded in " + shortName(only) + " yet.");
+			}
+			keys = List.of(only);
+		}
 		if (keys.isEmpty()) {
 			return Chat.error("Nothing recorded yet. If Xaero has been mapping and this stays empty, this version of"
 					+ " Xaero's World Map may not be supported.");
@@ -286,7 +293,8 @@ public final class XaeroExport {
 			if (anyImages) {
 				Blaze3D.openPath(root);
 				message = Chat.success("Export cleaned and ready to upload: map exports/" + root.getFileName()
-						+ ". Upload each dimension's folder to its own map.");
+						+ (keys.size() == 1 ? ". Upload it to the " + shortName(keys.getFirst()) + " map."
+								: ". Upload each dimension's folder to its own map."));
 				buttons.addFirst(Chat.openButton("Open folder", root));
 				message.append(report).append(Chat.buttons(buttons.toArray(Component[]::new)));
 				Chat.status(client, "export done, see chat.", ChatFormatting.GREEN);
@@ -425,7 +433,8 @@ public final class XaeroExport {
 					job.root = mapExports.resolve("aomc-visited-" + LocalDateTime.now().format(FOLDER_TIME));
 				}
 				if (folder == null) {
-					folder = job.root.resolve(folderName(key));
+					// One dimension needs no folder of its own.
+					folder = job.keys.size() == 1 ? job.root : job.root.resolve(folderName(key));
 					Files.createDirectories(folder);
 				}
 				if (tiles) {
@@ -485,20 +494,25 @@ public final class XaeroExport {
 			}
 			int number = AomcVisitedClient.VISITED.rememberExport(key, exported, job.writesAtStart);
 			job.buttons.add(Chat.button("Mark " + shortName(key) + " as uploaded", ChatFormatting.GREEN,
-					"/visited uploaded " + number, "Click once " + folderName(key) + "/ has been uploaded: forgets"
+					"/visited uploaded " + number, "Click once " + where() + " has been uploaded: forgets"
 							+ " what it contained, so the next export only has ground mapped since. Works after a"
 							+ " restart too."));
-			job.line(Component.literal(folderName(key) + "/: " + total.chunksKept() + " chunks (" + changed
+			job.line(Component.literal((job.keys.size() == 1 ? shortName(key) : folderName(key) + "/") + ": " + total.chunksKept() + " chunks (" + changed
 					+ " new or changed), " + left + (left == 1 ? " image" : " images")
 					+ (total.chunksBlackedOut() > 0 ? ", " + total.chunksBlackedOut() + " older chunks blacked out" : "")
 					+ "."));
 			job.nextDimension();
 		}
 
+		/** The folder this dimension's images go in, for messages. */
+		private String where() {
+			return job.keys.size() == 1 ? "the export" : folderName(key) + "/";
+		}
+
 		private void fail(Component problem) {
 			MutableComponent text = Component.literal(shortName(key) + ": ").append(problem);
 			if (total.tiles() > total.tilesDeleted()) {
-				text.append(" The areas before it are cleaned, but " + folderName(key) + "/ is incomplete.");
+				text.append(" The areas before it are cleaned, but " + where() + " is incomplete.");
 				job.anyImages = true;
 			} else {
 				deleteIfEmpty(folder);

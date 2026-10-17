@@ -37,6 +37,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 	private int ticksSinceSave;
 	/** The export starts a tick after the command, once the chat screen has closed. */
 	private boolean exportNextTick;
+	/** The dimension to export then, or null for every dimension with recorded ground. */
+	private String exportOnly;
 	/** Ticks until the reminder about earlier ground, after joining; 0 when there's none to show. */
 	private int reminderTicks;
 
@@ -60,10 +62,10 @@ public class AomcVisitedClient implements ClientModInitializer {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
 				ClientCommands.literal("visited")
 						.executes(context -> showCounts(context.getSource()))
-						.then(ClientCommands.literal("export")
-								.executes(context -> requestExport(context.getSource(), false))
-								.then(ClientCommands.literal("anyway").executes(context -> requestExport(context.getSource(), true)))
-								.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource()))))
+						.then(exportCommand(ClientCommands.literal("export"), null)
+								.then(exportCommand(ClientCommands.literal("overworld"), "minecraft:overworld"))
+								.then(exportCommand(ClientCommands.literal("the_nether"), "minecraft:the_nether"))
+								.then(exportCommand(ClientCommands.literal("the_end"), "minecraft:the_end")))
 						.then(ClientCommands.literal("clear")
 								.executes(context -> clear(context.getSource(), false))
 								.then(ClientCommands.literal("confirm").executes(context -> clear(context.getSource(), true)))
@@ -95,7 +97,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		if (exportNextTick) {
 			exportNextTick = false;
-			Component error = XaeroExport.start(client, null);
+			Component error = XaeroExport.start(client, exportOnly, null);
 			if (error != null && client.player != null) {
 				client.player.sendSystemMessage(error);
 			}
@@ -292,11 +294,22 @@ public class AomcVisitedClient implements ClientModInitializer {
 	}
 
 	/**
+	 * {@code /visited export [<dimension>] [anyway|without-packs]}: {@code only} is the dimension's id, or null
+	 * for every dimension with recorded ground.
+	 */
+	private <S extends com.mojang.brigadier.builder.ArgumentBuilder<FabricClientCommandSource, S>> S exportCommand(
+			S command, String only) {
+		return command.executes(context -> requestExport(context.getSource(), only, false))
+				.then(ClientCommands.literal("anyway").executes(context -> requestExport(context.getSource(), only, true)))
+				.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource(), only)));
+	}
+
+	/**
 	 * {@code /visited export [anyway]}: starts the export on the next tick (see {@link #exportNextTick}).
 	 * Xaero colours its map from block textures, so a resource pack changes the exported colours; unless
 	 * {@code anyway}, refuse while one of the player's own packs is on.
 	 */
-	private int requestExport(FabricClientCommandSource source, boolean anyway) {
+	private int requestExport(FabricClientCommandSource source, String only, boolean anyway) {
 		if (!xaeroInstalled()) {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
@@ -306,18 +319,20 @@ public class AomcVisitedClient implements ClientModInitializer {
 		List<String> packs = source.getClient().getResourcePackRepository().getSelectedIds().stream()
 				.filter(id -> id.startsWith("file/"))
 				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
+		String command = "/visited export" + (only == null ? "" : " " + only.substring(only.indexOf(':') + 1));
 		if (!packs.isEmpty() && !anyway) {
 			source.sendFeedback(Chat.warning("Resource packs change the colours of the exported map. These are on:")
 					.append(Chat.line(String.join(", ", packs)))
 					.append(Chat.buttons(
-							Chat.button("Turn packs off for the export", ChatFormatting.GREEN, "/visited export without-packs",
+							Chat.button("Turn packs off for the export", ChatFormatting.GREEN, command + " without-packs",
 									"Turns your resource packs off, exports, then turns them back on in the same"
 											+ " order. Reloads resources twice."),
-							Chat.button("Export anyway", ChatFormatting.RED, "/visited export anyway",
+							Chat.button("Export anyway", ChatFormatting.RED, command + " anyway",
 									"Export with the resource packs on: the colours on the webmap will be off"))));
 			return 0;
 		}
 		exportNextTick = true;
+		exportOnly = only;
 		return 1;
 	}
 
@@ -327,7 +342,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 	 * so if the game stops mid-way the packs are simply on again next launch. Xaero recalculates its block
 	 * colours after a reload (it clears its colour cache when the textures are re-stitched).
 	 */
-	private static int exportWithoutPacks(FabricClientCommandSource source) {
+	private static int exportWithoutPacks(FabricClientCommandSource source, String only) {
 		if (!xaeroInstalled()) {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
@@ -344,7 +359,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		source.sendFeedback(Chat.info("Turning your resource packs off for the export. They'll come back on"
 				+ " afterwards, in the same order."));
 		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
-			Component error = XaeroExport.start(client, () -> restorePacks(client, original));
+			Component error = XaeroExport.start(client, only, () -> restorePacks(client, original));
 			if (error != null) {
 				if (client.player != null) {
 					client.player.sendSystemMessage(error);
