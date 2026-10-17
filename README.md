@@ -8,7 +8,7 @@ Requires Xaero World Map.
 ## How to use
 
 1. Open the world map to see areas the mod has recorded: green outline around areas the export will include,
-   green fill on ground that's new or changed.
+   green fill on areas that are new or changed.
 2. When you're done, type **`/visited export`**. It exports every dimension you've been in (the game may
    freeze for a few seconds) and opens the exports folder.
 3. Upload each dimension's images to its corresponding map on the webmap.

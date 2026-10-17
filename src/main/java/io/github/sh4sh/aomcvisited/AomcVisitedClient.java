@@ -287,7 +287,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 					.append(Chat.buttons(
 							Chat.button("Turn packs off for the export", ChatFormatting.GREEN, command + " without-packs",
 									"Turns your resource packs off, exports, then turns them back on in the same"
-											+ " order. Reloads resources twice."),
+											+ " order. Minecraft reloads twice."),
 							Chat.button("Export anyway", ChatFormatting.RED, command + " anyway",
 									"Export with the resource packs on: the colours on the webmap will be off"))));
 			return 0;

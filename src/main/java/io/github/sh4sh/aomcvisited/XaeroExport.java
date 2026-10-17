@@ -441,7 +441,7 @@ public final class XaeroExport {
 			int number = AomcVisitedClient.VISITED.rememberExport(key, exported, job.writesAtStart);
 			job.buttons.add(Chat.button("Mark " + VisitedChunks.shortName(key) + " as uploaded", ChatFormatting.GREEN,
 					"/visited uploaded " + number, "Click once " + where() + " has been uploaded: forgets"
-							+ " what it contained, so the next export only has ground mapped since. Works after a"
+							+ " what it contained, so the next export only has areas mapped since. Works after a"
 							+ " restart too."));
 			String name = job.keys.size() == 1 ? VisitedChunks.shortName(key) : folderName(key) + "/";
 			job.line(Component.literal(name + ": " + total.chunksKept() + " chunks (" + changed + " new or changed), "

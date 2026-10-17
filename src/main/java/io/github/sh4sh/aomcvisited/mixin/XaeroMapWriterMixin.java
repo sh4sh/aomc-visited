@@ -45,7 +45,7 @@ public abstract class XaeroMapWriterMixin {
 	private void aomcVisited$recordWrite(MapTileChunk tileChunk, int x, int z, MapTile tile,
 			BlockStateShortShapeCache cache, MapProcessor processor, Operation<Void> original,
 			@Local(argsOnly = true) Level level) {
-		// No tile there yet means Xaero took a fresh one from its pool: ground the map didn't have.
+		// No tile there yet means Xaero took a fresh one from its pool: areas the map didn't have.
 		boolean differs = aomcVisited$differs || tileChunk.getTile(x, z) == null;
 		original.call(tileChunk, x, z, tile, cache, processor);
 		AomcVisitedClient.VISITED.mapped(level.dimension(), writingLayer, tile.getChunkX(), tile.getChunkZ(), differs);

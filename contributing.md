@@ -1,8 +1,8 @@
 # Working on AOMC Visited
 
-A client-side Fabric mod for the About Oliver Minecraft server (AOMC). It records the ground Xaero's World
-Map freshly maps, and exports just that ground for the community webmap (https://map.diorite.xyz),
-blacking out everything else. `README.md` is for players; this file is for working on the mod.
+A client-side Fabric mod for the About Oliver Minecraft server (AOMC). It records areas mapped by 
+Xaero's World Map, and exports just that area for the community webmap (https://map.diorite.xyz),
+removing everything else. `README.md` is for players; this file is for working on the mod.
 
 ## How it works
 
@@ -11,15 +11,15 @@ blacking out everything else. `README.md` is for players; this file is for worki
   are recorded (AOMC has a creative dimension). Saved every minute and on leaving, as text under
   `<game dir>/aomc_visited/server/<address>/`.
 - **Exporting** (`/visited export [overworld|the_nether|the_end] [anyway|without-packs]`, `XaeroExport`):
-  runs Xaero's own export for each dimension with recorded ground, switching Xaero's map to it, in a few
+  runs Xaero's own export for each dimension with recorded areas, switching Xaero's map to it, in a few
   compact areas (`ExportAreas`). Then blacks out every chunk not recorded (`TileMasker`) and gathers the
   images in one folder. Refuses in cave mode. While a resource pack is on, offers to turn packs off for
   the export (they may change Xaero's colours).
 - **Mark as uploaded** (`/visited uploaded <n>`, a button on the export message): forgets the chunks that
   export contained, except ones Xaero has changed since. Exports not yet marked are saved
   (`exports.txt`), so this works after a restart.
-- **Forgetting old ground**: keeping the record across sessions is for crashes and short breaks, not to
-  encourage uploading old ground. On joining, if the player was away more than an hour
+- **Forgetting old areas**: keeping the record across sessions is for crashes and short breaks, not to
+  encourage uploading old areas. On joining, if the player was away more than an hour
   (`FORGET_AFTER_MS`), the record is forgotten. Only time away counts, the same for every dimension: each
   save stamps every record file, and the newest stamp is when they were last here. Forgotten records move
   to `forgotten/` and can be restored with [Restore] on the "Forgot..." message (only there, with a hover
@@ -28,7 +28,7 @@ blacking out everything else. `README.md` is for players; this file is for worki
   (`/visited clear all`).
 - **Crashes**: a `playing` marker exists while on the server. Found on joining, the game crashed, and
   records up to a day old are kept (crash loops are short but can pass the hour).
-- **Map overlay** (`VisitedHighlighter`, `/visited show on|off`): green fill on new or changed ground, an
+- **Map overlay** (`VisitedHighlighter`, `/visited show on|off`): green fill on new or changed areas, an
   outline around everything the next export keeps.
 - Chat messages share one look (`Chat`): the mod's name first, one colour per kind of message, buttons
   centred on their own line, progress above the hotbar.
