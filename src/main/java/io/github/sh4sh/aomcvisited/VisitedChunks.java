@@ -120,6 +120,19 @@ public final class VisitedChunks {
 		this.root = root;
 	}
 
+	/**
+	 * The dimensions the webmap has. Others, like AOMC's creative dimension, are neither recorded nor
+	 * exported (sh4sh, October 2026).
+	 */
+	private static final java.util.Set<String> WEBMAP_DIMENSIONS =
+			java.util.Set.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end");
+
+	/** Whether a record key belongs to a dimension the webmap has. */
+	private static boolean onWebmap(String key) {
+		int slash = key.indexOf('/');
+		return WEBMAP_DIMENSIONS.contains(slash < 0 ? key : key.substring(0, slash));
+	}
+
 	/** The record key for a dimension and Xaero map layer. */
 	public static String recordKey(ResourceKey<Level> dimension, int layer) {
 		String id = dimension.identifier().toString();
@@ -139,6 +152,9 @@ public final class VisitedChunks {
 			open(serverKey(client));
 		}
 		String key = recordKey(dimension, layer);
+		if (!onWebmap(key)) {
+			return false;
+		}
 		long pos = ChunkPos.pack(x, z);
 		if (differs) {
 			lastWrite.computeIfAbsent(key, k -> new Long2LongOpenHashMap()).put(pos, ++writes);
@@ -250,7 +266,7 @@ public final class VisitedChunks {
 		long now = System.currentTimeMillis();
 		for (Path file : recordFiles(dir)) {
 			String key = keyFor(dir, file);
-			if (key == null || key.startsWith(FORGOTTEN + ":")) {
+			if (key == null || key.startsWith(FORGOTTEN + ":") || !onWebmap(key)) {
 				continue;
 			}
 			try {
