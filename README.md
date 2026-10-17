@@ -1,7 +1,7 @@
 # AOMC Visited
 
 A Fabric mod for the About Oliver Minecraft server. This mod records where you've been and 
-automatically prepares Xaero exports that you can upload to our webmap at https://map.diorite.xyz
+automatically prepares Xaero exports that you can upload to the community webmap at https://map.diorite.xyz
 
 Requires Xaero World Map.
 
