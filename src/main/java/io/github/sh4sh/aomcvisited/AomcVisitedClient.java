@@ -170,8 +170,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 		long now = System.currentTimeMillis();
 		List<VisitedChunks.Earlier> expired = VISITED.expired();
 		if (!expired.isEmpty()) {
-			MutableComponent message = Chat.info("Forgot your map data from last time (" + ago(now - lastHere(expired))
-					+ "): you were away for over an hour, so it may be out of date by now.");
+			MutableComponent message = Chat.info("Forgot your map data from " + ago(now - lastHere(expired))
+					+ ", since it may be out of date:");
 			for (VisitedChunks.Earlier record : expired) {
 				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
 			}
@@ -185,13 +185,12 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		String when = ago(now - lastHere(earlier));
 		MutableComponent message = Chat.info(VISITED.crashedLastTime()
-				? "Your game didn't close normally last time (" + when + "), so your map data was kept:"
-				: "Your map data from last time (" + when + ") is still here, not uploaded yet:");
+				? "Your game crashed " + when + ", so your map data was kept:"
+				: "Map data from " + when + " isn't uploaded yet:");
 		for (VisitedChunks.Earlier record : earlier) {
 			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}
-		message.append(Chat.line("Nothing you need to do: keep playing, and your next export includes it."));
-		message.append(Chat.line("It's only forgotten if you're offline for over an hour."));
+		message.append(Chat.line("Keep playing: your next export includes it. It's only forgotten after an hour offline."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
 						"Export it now, with anything you map from here on"),
