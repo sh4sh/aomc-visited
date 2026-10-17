@@ -29,10 +29,7 @@ import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
-/**
- * Records are keyed {@code minecraft:overworld}, or {@code minecraft:overworld/cave_<layer>} for a cave-mode
- * layer. Synchronized because the disconnect event may arrive off the main thread.
- */
+/** Records are keyed by dimension id. Synchronized because the disconnect event may arrive off the main thread. */
 public final class VisitedChunks {
 	private static final String EXPORTS_HEADER = "# AOMC Visited: exports not yet marked as uploaded."
 			+ " 'next <n>' is the next export's number; then one export per line: its number, its record, and the"
@@ -67,9 +64,6 @@ public final class VisitedChunks {
 	public static final long FORGET_AFTER_MS = 60 * 60 * 1000L;
 	private static final String FORGOTTEN = "forgotten";
 	public static final long KEEP_FORGOTTEN_MS = 24 * 60 * 60 * 1000L;
-	/** Exists while on the server, so finding it on joining means the game crashed. */
-	private static final String PLAYING_MARKER = "playing";
-	private boolean crashedLastTime;
 
 	public record Earlier(String key, int chunks) {
 	}
@@ -84,17 +78,7 @@ public final class VisitedChunks {
 	private static final Set<String> WEBMAP_DIMENSIONS =
 			Set.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end");
 
-	private static boolean onWebmap(String key) {
-		int slash = key.indexOf('/');
-		return WEBMAP_DIMENSIONS.contains(slash < 0 ? key : key.substring(0, slash));
-	}
-
-	public static String recordKey(ResourceKey<Level> dimension, int layer) {
-		String id = dimension.identifier().toString();
-		return layer == SURFACE_LAYER ? id : id + "/cave_" + layer;
-	}
-
-	public synchronized boolean mapped(ResourceKey<Level> dimension, int layer, int x, int z, boolean differs) {
+	public synchronized boolean mapped(ResourceKey<Level> dimension, int x, int z, boolean differs) {
 		if (server == null) {
 			Minecraft client = Minecraft.getInstance();
 			if (client.getConnection() == null) {
@@ -102,8 +86,8 @@ public final class VisitedChunks {
 			}
 			open(serverKey(client));
 		}
-		String key = recordKey(dimension, layer);
-		if (!onWebmap(key)) {
+		String key = dimension.identifier().toString();
+		if (!WEBMAP_DIMENSIONS.contains(key)) {
 			return false;
 		}
 		long pos = ChunkPos.pack(x, z);
@@ -189,15 +173,6 @@ public final class VisitedChunks {
 		close();
 		server = serverKey;
 		Path dir = root.resolve(server);
-		Path marker = dir.resolve(PLAYING_MARKER);
-		crashedLastTime = Files.exists(marker);
-		try {
-			Files.createDirectories(dir);
-			Files.writeString(marker, "AOMC Visited: the player is on this server, or the game didn't close normally.\n");
-		} catch (IOException e) {
-			AomcVisitedClient.LOGGER.error("Could not write {}", marker, e);
-		}
-		long forgetAfter = crashedLastTime ? KEEP_FORGOTTEN_MS : FORGET_AFTER_MS;
 		loadExports(dir.resolve("exports.txt"));
 		List<Earlier> found = new ArrayList<>(), tooOld = new ArrayList<>();
 		long now = System.currentTimeMillis();
@@ -207,7 +182,7 @@ public final class VisitedChunks {
 			if (key == null || key.startsWith(FORGOTTEN + ":")) {
 				continue;
 			}
-			if (onWebmap(key)) {
+			if (WEBMAP_DIMENSIONS.contains(key)) {
 				files.add(file);
 			} else {
 				deleteQuietly(file);
@@ -227,17 +202,17 @@ public final class VisitedChunks {
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
 				Earlier record = new Earlier(key, chunks.size());
-				if (now - lastHere > forgetAfter) {
+				if (now - lastHere > FORGET_AFTER_MS) {
 					Path kept = forgottenFile(key);
 					Files.createDirectories(kept.getParent());
 					Files.move(file, kept, StandardCopyOption.REPLACE_EXISTING);
 					Files.setLastModifiedTime(kept, FileTime.fromMillis(lastHere));
-					if (!key.contains("/") && !chunks.isEmpty()) {
+					if (!chunks.isEmpty()) {
 						tooOld.add(record);
 					}
 					continue;
 				}
-				if (!key.contains("/") && !chunks.isEmpty()) {
+				if (!chunks.isEmpty()) {
 					found.add(record);
 				}
 				addRecord(key, chunks, changedChunks);
@@ -287,10 +262,6 @@ public final class VisitedChunks {
 		return restored;
 	}
 
-	public synchronized boolean crashedLastTime() {
-		return crashedLastTime;
-	}
-
 	public synchronized long lastHere() {
 		return lastHere;
 	}
@@ -305,14 +276,6 @@ public final class VisitedChunks {
 
 	public synchronized void close() {
 		save();
-		if (server != null) {
-			try {
-				Files.deleteIfExists(root.resolve(server).resolve(PLAYING_MARKER));
-			} catch (IOException e) {
-				AomcVisitedClient.LOGGER.error("Could not delete the {} marker", PLAYING_MARKER, e);
-			}
-		}
-		crashedLastTime = false;
 		server = null;
 		records.clear();
 		changed.clear();
@@ -366,10 +329,8 @@ public final class VisitedChunks {
 	}
 
 	public synchronized int clearAll() {
-		Set<String> dimensions = new HashSet<>();
-		records.keySet().forEach(key -> dimensions.add(key.split("/", 2)[0]));
 		int forgotten = 0;
-		for (String id : dimensions) {
+		for (String id : records.keySet().toArray(new String[0])) {
 			forgotten += clear(id);
 		}
 		return forgotten;
@@ -378,27 +339,24 @@ public final class VisitedChunks {
 	private int clear(String id) {
 		int forgotten = 0;
 		if (server != null) {
-			deleteForgotten(key -> key.equals(id) || key.startsWith(id + "/"), Long.MAX_VALUE);
+			deleteForgotten(id::equals, Long.MAX_VALUE);
 		}
-		if (exports.values().removeIf(export -> export.key().equals(id) || export.key().startsWith(id + "/"))) {
+		if (exports.values().removeIf(export -> export.key().equals(id))) {
 			exportsDirty = true;
 		}
-		for (String key : records.keySet().toArray(new String[0])) {
-			if (!key.equals(id) && !key.startsWith(id + "/")) {
-				continue;
-			}
-			forgotten += records.remove(key).size();
-			changed.remove(key);
-			lastWrite.remove(key);
-			dirty.remove(key);
+		if (records.containsKey(id)) {
+			forgotten += records.remove(id).size();
+			changed.remove(id);
+			lastWrite.remove(id);
+			dirty.remove(id);
 			// With no record, every region's highlight hash is 0 again: callers refresh the whole map.
-			regionCounts.remove(key);
-			regionHashes.remove(key);
+			regionCounts.remove(id);
+			regionHashes.remove(id);
 			if (server != null) {
 				try {
-					Files.deleteIfExists(fileFor(key));
+					Files.deleteIfExists(fileFor(id));
 				} catch (IOException e) {
-					AomcVisitedClient.LOGGER.error("Could not delete {}", fileFor(key), e);
+					AomcVisitedClient.LOGGER.error("Could not delete {}", fileFor(id), e);
 				}
 			}
 		}
@@ -453,9 +411,8 @@ public final class VisitedChunks {
 		return forgotten;
 	}
 
-	public synchronized List<String> surfaceKeys() {
-		return records.entrySet().stream()
-				.filter(record -> !record.getKey().contains("/") && !record.getValue().isEmpty())
+	public synchronized List<String> dimensions() {
+		return records.entrySet().stream().filter(record -> !record.getValue().isEmpty())
 				.map(Map.Entry::getKey).toList();
 	}
 
@@ -465,14 +422,8 @@ public final class VisitedChunks {
 	}
 
 	public synchronized int count(ResourceKey<Level> dimension) {
-		String id = dimension.identifier().toString();
-		int total = 0;
-		for (Map.Entry<String, LongOpenHashSet> record : records.entrySet()) {
-			if (record.getKey().equals(id) || record.getKey().startsWith(id + "/")) {
-				total += record.getValue().size();
-			}
-		}
-		return total;
+		LongOpenHashSet chunks = records.get(dimension.identifier().toString());
+		return chunks == null ? 0 : chunks.size();
 	}
 
 	public synchronized Map<String, Integer> counts() {

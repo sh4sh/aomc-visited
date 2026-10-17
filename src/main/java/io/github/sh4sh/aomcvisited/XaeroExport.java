@@ -90,7 +90,7 @@ public final class XaeroExport {
 		if (processor == null || !processor.isMapWorldUsable() || processor.getMapWorld() == null) {
 			return Chat.error("Xaero's World Map isn't ready yet. Open the world map once, then try again.");
 		}
-		List<String> keys = AomcVisitedClient.VISITED.surfaceKeys();
+		List<String> keys = AomcVisitedClient.VISITED.dimensions();
 		if (only != null) {
 			if (!keys.contains(only)) {
 				return Chat.error("Nothing recorded in " + VisitedChunks.shortName(only) + " yet.");

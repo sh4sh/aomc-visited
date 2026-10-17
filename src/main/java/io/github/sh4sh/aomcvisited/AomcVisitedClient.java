@@ -166,9 +166,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		if (earlier.isEmpty()) {
 			return;
 		}
-		MutableComponent message = Chat.info(VISITED.crashedLastTime()
-				? "Your game crashed " + when + ", so your map data was kept:"
-				: "Map data from " + when + " isn't uploaded yet:");
+		MutableComponent message = Chat.info("Map data from " + when + " isn't uploaded yet:");
 		for (VisitedChunks.Earlier record : earlier) {
 			message.append(Chat.line(VisitedChunks.shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}

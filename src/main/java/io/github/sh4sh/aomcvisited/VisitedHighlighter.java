@@ -66,9 +66,6 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 			return;
 		}
 		changed.forEach((key, regions) -> {
-			if (key.contains("/")) {
-				return; // A cave-mode layer: not shown.
-			}
 			MapDimension mapDimension = processor.getMapWorld()
 					.getDimension(ResourceKey.create(Registries.DIMENSION, Identifier.parse(key)));
 			if (mapDimension != null) {
@@ -88,7 +85,7 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 	}
 
 	private static String key(ResourceKey<Level> dimension) {
-		return VisitedChunks.recordKey(dimension, VisitedChunks.SURFACE_LAYER);
+		return dimension.identifier().toString();
 	}
 
 	private static boolean recorded(ResourceKey<Level> dimension, int x, int z) {
