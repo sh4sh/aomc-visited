@@ -124,7 +124,7 @@ public final class XaeroExport {
 		List<String> keys = AomcVisitedClient.VISITED.surfaceKeys();
 		if (only != null) {
 			if (!keys.contains(only)) {
-				return Chat.error("Nothing recorded in " + shortName(only) + " yet.");
+				return Chat.error("Nothing recorded in " + VisitedChunks.shortName(only) + " yet.");
 			}
 			keys = List.of(only);
 		}
@@ -132,7 +132,7 @@ public final class XaeroExport {
 			return Chat.error("Nothing recorded yet. If Xaero has been mapping and this stays empty, this version of"
 					+ " Xaero's World Map may not be supported.");
 		}
-		List<String> names = keys.stream().map(XaeroExport::shortName).toList();
+		List<String> names = keys.stream().map(VisitedChunks::shortName).toList();
 		// Only mention switching when Xaero's map will show another dimension than it does now.
 		ResourceKey<Level> showing = processor.getMapWorld().getCurrentDimensionId();
 		boolean switches = keys.size() > 1 || showing == null || !keys.getFirst().equals(showing.identifier().toString());
@@ -214,7 +214,7 @@ public final class XaeroExport {
 							&& target.equals(world.getCurrentDimensionId())) {
 						stage(Stage.SETTLING);
 					} else if (inStage() > SWITCH_TIMEOUT_MS) {
-						line(red(shortName(keys.get(dimension)) + ": Xaero didn't switch its map to it in time,"
+						line(red(VisitedChunks.shortName(keys.get(dimension)) + ": Xaero didn't switch its map to it in time,"
 								+ " so it was skipped. Try again."));
 						nextDimension();
 					}
@@ -246,7 +246,7 @@ public final class XaeroExport {
 		 * while the game is running; they stop while Xaero's export freezes it.
 		 */
 		private void showProgress() {
-			String name = shortName(keys.get(dimension));
+			String name = VisitedChunks.shortName(keys.get(dimension));
 			String of = keys.size() > 1 ? " (" + (dimension + 1) + " of " + keys.size() + ")" : "";
 			String what = stage == Stage.SWITCHING || stage == Stage.SETTLING || run == null
 					? "switching Xaero's map to " + name + of
@@ -259,7 +259,7 @@ public final class XaeroExport {
 			// The webmap's main maps (the Nether is mapped on the roof) are made with cave mode off; a cave
 			// mode export would be a separate feature.
 			if (processor.getCurrentCaveLayer() != VisitedChunks.SURFACE_LAYER) {
-				line(red(shortName(keys.get(dimension)) + ": Xaero's map is in cave mode there, so it was skipped."
+				line(red(VisitedChunks.shortName(keys.get(dimension)) + ": Xaero's map is in cave mode there, so it was skipped."
 						+ " Turn cave mode off and export again."));
 				nextDimension();
 				return;
@@ -293,7 +293,7 @@ public final class XaeroExport {
 			if (anyImages) {
 				Blaze3D.openPath(root);
 				message = Chat.success("Export cleaned and ready to upload: map exports/" + root.getFileName()
-						+ (keys.size() == 1 ? ". Upload it to the " + shortName(keys.getFirst()) + " map."
+						+ (keys.size() == 1 ? ". Upload it to the " + VisitedChunks.shortName(keys.getFirst()) + " map."
 								: ". Upload each dimension's folder to its own map."));
 				buttons.addFirst(Chat.openButton("Open folder", root));
 				message.append(report).append(Chat.buttons(buttons.toArray(Component[]::new)));
@@ -482,7 +482,7 @@ public final class XaeroExport {
 			int left = total.tiles() - total.tilesDeleted();
 			if (left == 0) {
 				deleteIfEmpty(folder);
-				job.line(Component.literal(shortName(key) + ": nothing to upload."));
+				job.line(Component.literal(VisitedChunks.shortName(key) + ": nothing to upload."));
 				job.nextDimension();
 				return;
 			}
@@ -495,12 +495,13 @@ public final class XaeroExport {
 				}
 			}
 			int number = AomcVisitedClient.VISITED.rememberExport(key, exported, job.writesAtStart);
-			job.buttons.add(Chat.button("Mark " + shortName(key) + " as uploaded", ChatFormatting.GREEN,
+			job.buttons.add(Chat.button("Mark " + VisitedChunks.shortName(key) + " as uploaded", ChatFormatting.GREEN,
 					"/visited uploaded " + number, "Click once " + where() + " has been uploaded: forgets"
 							+ " what it contained, so the next export only has ground mapped since. Works after a"
 							+ " restart too."));
-			job.line(Component.literal((job.keys.size() == 1 ? shortName(key) : folderName(key) + "/") + ": " + total.chunksKept() + " chunks (" + changed
-					+ " new or changed), " + left + (left == 1 ? " image" : " images")
+			String name = job.keys.size() == 1 ? VisitedChunks.shortName(key) : folderName(key) + "/";
+			job.line(Component.literal(name + ": " + total.chunksKept() + " chunks (" + changed + " new or changed), "
+					+ left + (left == 1 ? " image" : " images")
 					+ (total.chunksBlackedOut() > 0 ? ", " + total.chunksBlackedOut() + " older chunks blacked out" : "")
 					+ "."));
 			job.nextDimension();
@@ -512,7 +513,7 @@ public final class XaeroExport {
 		}
 
 		private void fail(Component problem) {
-			MutableComponent text = Component.literal(shortName(key) + ": ").append(problem);
+			MutableComponent text = Component.literal(VisitedChunks.shortName(key) + ": ").append(problem);
 			if (total.tiles() > total.tilesDeleted()) {
 				text.append(" The areas before it are cleaned, but " + where() + " is incomplete.");
 				job.anyImages = true;
@@ -524,13 +525,8 @@ public final class XaeroExport {
 		}
 	}
 
-	/** {@code minecraft:the_nether} -> {@code the_nether}; other namespaces keep theirs. */
-	private static String shortName(String key) {
-		return key.startsWith("minecraft:") ? key.substring("minecraft:".length()) : key;
-	}
-
 	private static String folderName(String key) {
-		return shortName(key).replaceAll("[^A-Za-z0-9._-]", "_");
+		return VisitedChunks.shortName(key).replaceAll("[^A-Za-z0-9._-]", "_");
 	}
 
 	private static void deleteIfEmpty(Path folder) {

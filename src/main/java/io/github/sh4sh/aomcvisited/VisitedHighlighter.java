@@ -21,8 +21,9 @@ import java.util.Map;
 /**
  * Shows the next export on Xaero's World Map (and its minimap): new or changed ground is filled green,
  * and a green outline runs around everything the export keeps, including unchanged ground (which is
- * exported too, but has no fill). Two shades of fill were tried first and were hard to tell apart. Registered by {@code XaeroWorldMapSessionMixin}; only load this class when
- * {@code xaeroworldmap} is installed.
+ * exported too, but has no fill). Two shades of fill were tried first and were hard to tell apart.
+ * Registered by {@code XaeroWorldMapSessionMixin}; only load this class when {@code xaeroworldmap} is
+ * installed.
  *
  * <p>Xaero caches highlights per 512-block region by {@link #calculateRegionHash}, so whenever what we'd
  * show changes we clear that cache ({@link #refreshChanged}, {@link #refreshAll}). Xaero reloads a region

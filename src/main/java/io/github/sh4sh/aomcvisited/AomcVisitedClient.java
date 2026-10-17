@@ -118,13 +118,13 @@ public class AomcVisitedClient implements ClientModInitializer {
 			source.sendFeedback(Chat.error("Not connected to a world."));
 			return 0;
 		}
-		Map<String, Integer> counts = new java.util.TreeMap<>(VISITED.counts());
+		Map<String, Integer> counts = VISITED.counts();
 		counts.values().removeIf(count -> count == 0);
 		MutableComponent message = Chat.info("Chunks recorded on " + server.substring(server.indexOf('/') + 1) + ":");
 		if (counts.isEmpty()) {
 			message.append(Chat.line("none yet"));
 		}
-		counts.forEach((key, count) -> message.append(Chat.line(shortName(key) + ": " + count)));
+		counts.forEach((key, count) -> message.append(Chat.line(VisitedChunks.shortName(key) + ": " + count)));
 		source.sendFeedback(message);
 		return 1;
 	}
@@ -167,13 +167,12 @@ public class AomcVisitedClient implements ClientModInitializer {
 		if (client.player == null) {
 			return;
 		}
-		long now = System.currentTimeMillis();
+		String when = ago(System.currentTimeMillis() - VISITED.lastHere());
 		List<VisitedChunks.Earlier> expired = VISITED.expired();
 		if (!expired.isEmpty()) {
-			MutableComponent message = Chat.info("Forgot your map data from " + ago(now - lastHere(expired))
-					+ ", since it may be out of date:");
+			MutableComponent message = Chat.info("Forgot your map data from " + when + ", since it may be out of date:");
 			for (VisitedChunks.Earlier record : expired) {
-				message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
+				message.append(Chat.line(VisitedChunks.shortName(record.key()) + ": " + record.chunks() + " chunks"));
 			}
 			Chat.send(client, message.append(Chat.buttons(Chat.button("Restore", ChatFormatting.GOLD,
 					"/visited restore", "May be out of date: only restore it if nobody else has mapped there since."
@@ -183,28 +182,19 @@ public class AomcVisitedClient implements ClientModInitializer {
 		if (earlier.isEmpty()) {
 			return;
 		}
-		String when = ago(now - lastHere(earlier));
 		MutableComponent message = Chat.info(VISITED.crashedLastTime()
 				? "Your game crashed " + when + ", so your map data was kept:"
 				: "Map data from " + when + " isn't uploaded yet:");
 		for (VisitedChunks.Earlier record : earlier) {
-			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
+			message.append(Chat.line(VisitedChunks.shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}
-		message.append(Chat.line("If you keep playing, your next export includes it. It's only forgotten after an hour offline."));
+		message.append(Chat.line("If you keep playing, your next export includes it. It's only forgotten after an"
+				+ " hour offline."));
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it now", ChatFormatting.GREEN, "/visited export",
 						"Export it now, or later: it stays in the record either way"),
 				Chat.button("Start over", ChatFormatting.RED, "/visited clear all",
 						"Forget it in every dimension (asks to confirm)"))));
-	}
-
-	/** When the player was last here, going by the records' save times. */
-	private static long lastHere(List<VisitedChunks.Earlier> records) {
-		return records.stream().mapToLong(VisitedChunks.Earlier::savedMillis).max().orElse(0);
-	}
-
-	private static String shortName(String key) {
-		return key.startsWith("minecraft:") ? key.substring("minecraft:".length()) : key;
 	}
 
 	private static String ago(long ms) {
@@ -323,7 +313,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		List<String> packs = source.getClient().getResourcePackRepository().getSelectedIds().stream()
 				.filter(id -> id.startsWith("file/"))
 				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
-		String command = "/visited export" + (only == null ? "" : " " + only.substring(only.indexOf(':') + 1));
+		String command = "/visited export" + (only == null ? "" : " " + VisitedChunks.shortName(only));
 		if (!packs.isEmpty() && !anyway) {
 			source.sendFeedback(Chat.warning("Resource packs change the colours of the exported map. These are on:")
 					.append(Chat.line(String.join(", ", packs)))

@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
@@ -87,6 +90,8 @@ public final class VisitedChunks {
 	private List<Earlier> earlier = List.of();
 	/** The normal-map records forgotten when the server was opened, for being too old. */
 	private List<Earlier> expired = List.of();
+	/** When the player was last on the server before joining, by the record files' times (0 if unknown). */
+	private long lastHere;
 
 	/**
 	 * Records are forgotten when joining if the player was away longer than this. Keeping the record across
@@ -109,8 +114,8 @@ public final class VisitedChunks {
 	private static final String PLAYING_MARKER = "playing";
 	private boolean crashedLastTime;
 
-	/** A record from an earlier session: its key, chunk count, and when it was last saved. */
-	public record Earlier(String key, int chunks, long savedMillis) {
+	/** A record from an earlier session: its key and chunk count. */
+	public record Earlier(String key, int chunks) {
 	}
 
 	/** What an export contained: a record's chunks, and {@link #writes} when it was made. */
@@ -125,8 +130,8 @@ public final class VisitedChunks {
 	 * The dimensions the webmap has. Others, like AOMC's creative dimension, are neither recorded nor
 	 * exported (sh4sh, October 2026).
 	 */
-	private static final java.util.Set<String> WEBMAP_DIMENSIONS =
-			java.util.Set.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end");
+	private static final Set<String> WEBMAP_DIMENSIONS =
+			Set.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end");
 
 	/** Whether a record key belongs to a dimension the webmap has. */
 	private static boolean onWebmap(String key) {
@@ -180,12 +185,6 @@ public final class VisitedChunks {
 	public synchronized boolean isChanged(String key, int x, int z) {
 		LongOpenHashSet chunks = changed.get(key);
 		return chunks != null && chunks.contains(ChunkPos.pack(x, z));
-	}
-
-	/** How many of a record's chunks are new or changed. */
-	public synchronized int changedCount(String key) {
-		LongOpenHashSet chunks = changed.get(key);
-		return chunks == null ? 0 : chunks.size();
 	}
 
 	/** The hash of what the map highlight draws in a region (see {@link #regionHashes}). */
@@ -263,18 +262,26 @@ public final class VisitedChunks {
 		}
 		long forgetAfter = crashedLastTime ? KEEP_FORGOTTEN_MS : FORGET_AFTER_MS;
 		loadExports(dir.resolve("exports.txt"));
-		List<Earlier> found = new java.util.ArrayList<>(), tooOld = new java.util.ArrayList<>();
+		List<Earlier> found = new ArrayList<>(), tooOld = new ArrayList<>();
 		long now = System.currentTimeMillis();
-		List<Path> files = recordFiles(dir).stream().filter(file -> {
+		List<Path> files = new ArrayList<>();
+		for (Path file : recordFiles(dir)) {
 			String key = keyFor(dir, file);
-			return key != null && !key.startsWith(FORGOTTEN + ":") && onWebmap(key);
-		}).toList();
-		// When the player was last here: every record file is stamped on each save, so the newest stamp.
-		// Files saved by versions before 0.2.17 were only stamped when they changed.
-		long saved = 0;
+			if (key == null || key.startsWith(FORGOTTEN + ":")) {
+				continue;
+			}
+			if (onWebmap(key)) {
+				files.add(file);
+			} else {
+				// Recorded by a version before 0.2.14, which also recorded other dimensions.
+				deleteQuietly(file);
+			}
+		}
+		// Every record file is stamped on each save, so the newest stamp is when the player was last here.
+		lastHere = 0;
 		for (Path file : files) {
 			try {
-				saved = Math.max(saved, Files.getLastModifiedTime(file).toMillis());
+				lastHere = Math.max(lastHere, Files.getLastModifiedTime(file).toMillis());
 			} catch (IOException e) {
 				AomcVisitedClient.LOGGER.error("Could not read the time of {}", file, e);
 			}
@@ -284,14 +291,14 @@ public final class VisitedChunks {
 			try {
 				LongOpenHashSet chunks = new LongOpenHashSet(), changedChunks = new LongOpenHashSet();
 				load(file, chunks, changedChunks);
-				Earlier record = new Earlier(key, chunks.size(), saved);
-				if (now - saved > forgetAfter) {
+				Earlier record = new Earlier(key, chunks.size());
+				if (now - lastHere > forgetAfter) {
 					// Kept a while in case the player wants it back (see restoreForgotten); the file's time says
 					// when the player was last here.
 					Path kept = forgottenFile(key);
 					Files.createDirectories(kept.getParent());
 					Files.move(file, kept, StandardCopyOption.REPLACE_EXISTING);
-					Files.setLastModifiedTime(kept, java.nio.file.attribute.FileTime.fromMillis(saved));
+					Files.setLastModifiedTime(kept, FileTime.fromMillis(lastHere));
 					if (!key.contains("/") && !chunks.isEmpty()) {
 						tooOld.add(record);
 					}
@@ -306,8 +313,8 @@ public final class VisitedChunks {
 			}
 		}
 		deleteForgotten(key -> true, now - KEEP_FORGOTTEN_MS);
-		found.sort(java.util.Comparator.comparing(Earlier::key));
-		tooOld.sort(java.util.Comparator.comparing(Earlier::key));
+		found.sort(Comparator.comparing(Earlier::key));
+		tooOld.sort(Comparator.comparing(Earlier::key));
 		earlier = List.copyOf(found);
 		expired = List.copyOf(tooOld);
 		if (exports.values().removeIf(export -> !records.containsKey(export.key()))) {
@@ -355,6 +362,11 @@ public final class VisitedChunks {
 	/** Whether the game didn't close normally the last time the player was on this server. */
 	public synchronized boolean crashedLastTime() {
 		return crashedLastTime;
+	}
+
+	/** When the player was last on this server before joining, or 0 if unknown. */
+	public synchronized long lastHere() {
+		return lastHere;
 	}
 
 	/** The records forgotten when joining for being older than {@link #FORGET_AFTER_MS}. */
@@ -413,7 +425,7 @@ public final class VisitedChunks {
 			}
 		}
 		dirty.clear();
-		java.nio.file.attribute.FileTime now = java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis());
+		FileTime now = FileTime.fromMillis(System.currentTimeMillis());
 		for (String key : records.keySet()) {
 			Path file = fileFor(key);
 			try {
@@ -696,6 +708,19 @@ public final class VisitedChunks {
 		}
 	}
 
+	private static void deleteQuietly(Path file) {
+		try {
+			Files.deleteIfExists(file);
+		} catch (IOException e) {
+			AomcVisitedClient.LOGGER.error("Could not delete {}", file, e);
+		}
+	}
+
+	/** {@code minecraft:the_nether} -> {@code the_nether}; other namespaces keep theirs. */
+	public static String shortName(String key) {
+		return key.startsWith("minecraft:") ? key.substring("minecraft:".length()) : key;
+	}
+
 	/** {@code <dir>/minecraft/overworld/cave_5.txt} -> {@code minecraft:overworld/cave_5}; null for other files. */
 	private static String keyFor(Path dir, Path file) {
 		Path rel = dir.relativize(file);
@@ -707,7 +732,7 @@ public final class VisitedChunks {
 	}
 
 	/** Deletes the forgotten records whose key matches, if the player was last here before {@code before}. */
-	private void deleteForgotten(java.util.function.Predicate<String> matches, long before) {
+	private void deleteForgotten(Predicate<String> matches, long before) {
 		Path dir = root.resolve(server).resolve(FORGOTTEN);
 		for (Path file : recordFiles(dir)) {
 			String key = keyFor(dir, file);
