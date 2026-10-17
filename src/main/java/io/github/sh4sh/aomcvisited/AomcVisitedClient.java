@@ -190,10 +190,10 @@ public class AomcVisitedClient implements ClientModInitializer {
 		for (VisitedChunks.Earlier record : earlier) {
 			message.append(Chat.line(shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}
-		message.append(Chat.line("Keep playing: your next export includes it. It's only forgotten after an hour offline."));
+		message.append(Chat.line("If you keep playing, your next export includes it. It's only forgotten after an hour offline."));
 		Chat.send(client, message.append(Chat.buttons(
-				Chat.button("Export it", ChatFormatting.GREEN, "/visited export",
-						"Export it now, with anything you map from here on"),
+				Chat.button("Export it now", ChatFormatting.GREEN, "/visited export",
+						"Export it now, or later: it stays in the record either way"),
 				Chat.button("Start over", ChatFormatting.RED, "/visited clear all",
 						"Forget it in every dimension (asks to confirm)"))));
 	}
