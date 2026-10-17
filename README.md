@@ -18,10 +18,9 @@ Requires Xaero World Map.
 Turn Xaero's cave mode off before exporting. If you have a resource pack on, the mod offers to turn it off
 for the export and back on afterwards, since they can change the map's colours.
 
-If you don't export before logging off, you can still continue your session if you come back within an hour.
-This functionality is mostly meant to preserve work through game crashes.
-After an hour, the record is moved to the "forgotten" folder for 24 hours before deletion. It can be restored,
-but it's usually better to avoid this since the map data might be outdated! Make sure you know what you're doing!
+If you don't export before logging off, the mod keeps what you mapped, so you can continue with the last session.
+If you come back after more than six hours, it reminds you that the map data may be out of date, and you
+can choose to continue with the last session or clear the data to start a new session.
 
 ## Commands
 

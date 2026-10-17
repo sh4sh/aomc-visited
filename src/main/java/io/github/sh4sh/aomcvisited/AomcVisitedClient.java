@@ -153,11 +153,12 @@ public class AomcVisitedClient implements ClientModInitializer {
 			return;
 		}
 		List<VisitedChunks.Earlier> earlier = VISITED.earlier();
-		if (earlier.isEmpty()) {
+		long away = System.currentTimeMillis() - VISITED.lastHere();
+		if (earlier.isEmpty() || away <= VisitedChunks.OUT_OF_DATE_MS) {
 			return;
 		}
-		MutableComponent message = Chat.info("Map data from " + ago(System.currentTimeMillis() - VISITED.lastHere())
-				+ " isn't uploaded yet:");
+		MutableComponent message = Chat.warning("Map data from " + ago(away)
+				+ " isn't uploaded yet, and may be out of date:");
 		for (VisitedChunks.Earlier record : earlier) {
 			message.append(Chat.line(VisitedChunks.shortName(record.key()) + ": " + record.chunks() + " chunks"));
 		}
@@ -165,7 +166,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 		Chat.send(client, message.append(Chat.buttons(
 				Chat.button("Export it now", ChatFormatting.GREEN, "/visited export",
 						"Export it now, or later: it stays in the record either way"),
-				Chat.button("Start over", ChatFormatting.RED, "/visited clear all",
+				Chat.button("Clear old session", ChatFormatting.RED, "/visited clear all",
 						"Forget it in every dimension (asks to confirm)"))));
 	}
 

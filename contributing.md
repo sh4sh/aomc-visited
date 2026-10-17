@@ -11,11 +11,9 @@
   export contained, except ones Xaero has changed since. Works after a restart (`exports.txt`).
   Similar to `/visited clear`, which removes all old exports/records (not just the marked upload) in a given
   dimension.
-- **Forgetting old areas**: if the player was offline for more than an hour (`FORGET_AFTER_MS`), the record is
-  forgotten on next login, but can still be restored with [Restore] for a day. Otherwise, a reminder offers
-  [Export it now] and [Start over] (`/visited clear all`). Restores are meant to have more friction, to
-  discourage users from exporting old map data they don't remember. It is kind of convoluted though, open
-  to suggestions on how this should be designed
+- **Old map data**: the record is kept until the player exports it or clears it. On joining after more than
+  six hours offline (`OUT_OF_DATE_MS`), a reminder warns that the data may be out of date and offers
+  [Export it now] and [Clear old session] (`/visited clear all`).
 - **Map overlay** (`VisitedHighlighter`, `/visited overlay on|off`): green fill on new or changed areas, an
   outline around everything the next export keeps.
 

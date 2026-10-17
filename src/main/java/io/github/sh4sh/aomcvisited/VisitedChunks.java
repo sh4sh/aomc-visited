@@ -57,6 +57,7 @@ public final class VisitedChunks {
 	private List<Earlier> earlier = List.of();
 	private long lastHere;
 
+	public static final long OUT_OF_DATE_MS = 6 * 60 * 60 * 1000L;
 
 	public record Earlier(String key, int chunks) {
 	}
