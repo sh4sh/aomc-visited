@@ -31,7 +31,7 @@ but it's usually better to avoid this since the map data might be outdated! Make
 | `/visited export [overworld\|the_nether\|the_end]` | Export what you've mapped, cleaned and ready to upload |
 | `/visited uploaded` | Mark the latest export as uploaded (same as the button) |
 | `/visited on\|off` | Turn the mod on or off: when off, nothing is recorded or shown |
-| `/visited show on\|off` | Show or hide the green overlay on Xaero's map |
+| `/visited overlay on\|off` | Show or hide the green overlay on Xaero's map |
 | `/visited clear` | Forget what's recorded in your current dimension (asks to confirm) |
 | `/visited clear all` | Forget everything recorded on this server (asks to confirm) |
 | `/visited restore` | Bring back export data that was forgotten after more than an hour offline |

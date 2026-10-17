@@ -3,7 +3,7 @@
 - **Recording** (`XaeroMapWriterMixin`, `VisitedChunks`): records chunks that Xaero's World Map writes on its 
   map, per server and dimension (only dimensions named overworld, Nether and End are supported), marked "changed"
   if its map data was updated. Saved once per minute and when leaving the server.
-- **Exporting** (`/visited export [overworld|the_nether|the_end] [anyway|without-packs]`, `XaeroExport`):
+- **Exporting** (`/visited export [overworld|the_nether|the_end] [without-packs|not-for-webmap]`, `XaeroExport`):
   runs Xaero's export for each dimension with records, in a few compact areas (`ExportAreas`). Trims the export by
   blacking out chunks not in records (`TileMasker`), and gathers the images in one folder. Refuses while in
   cave mode. Offers to turn resource packs off for the export, since they may change Xaero's colours.
@@ -16,7 +16,7 @@
   [Export it now] and [Start over] (`/visited clear all`). Restores are meant to have more friction, to
   discourage users from exporting old map data they don't remember. It is kind of convoluted though, open
   to suggestions on how this should be designed
-- **Map overlay** (`VisitedHighlighter`, `/visited show on|off`): green fill on new or changed areas, an
+- **Map overlay** (`VisitedHighlighter`, `/visited overlay on|off`): green fill on new or changed areas, an
   outline around everything the next export keeps.
 
 ## Files the mod writes

@@ -75,7 +75,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 										markUploaded(context.getSource(), IntegerArgumentType.getInteger(context, "export")))))
 						.then(ClientCommands.literal("on").executes(context -> setEnabled(context.getSource(), true)))
 						.then(ClientCommands.literal("off").executes(context -> setEnabled(context.getSource(), false)))
-						.then(ClientCommands.literal("show")
+						.then(ClientCommands.literal("overlay")
 								.executes(context -> setShow(context.getSource(), !SETTINGS.showOnMap()))
 								.then(ClientCommands.literal("on").executes(context -> setShow(context.getSource(), true)))
 								.then(ClientCommands.literal("off").executes(context -> setShow(context.getSource(), false))))));
@@ -271,19 +271,19 @@ public class AomcVisitedClient implements ClientModInitializer {
 			VisitedHighlighter.refreshAll();
 		}
 		source.sendFeedback(Chat.info(show
-				? "Showing what the next export will keep on Xaero's World Map. Hide it with /visited show off."
-				: "No longer showing the record on Xaero's World Map. Show it again with /visited show on."));
+				? "Showing what the next export will keep on Xaero's World Map. Hide it with /visited overlay off."
+				: "No longer showing the record on Xaero's World Map. Show it again with /visited overlay on."));
 		return 1;
 	}
 
 	private <S extends com.mojang.brigadier.builder.ArgumentBuilder<FabricClientCommandSource, S>> S exportCommand(
 			S command, String only) {
 		return command.executes(context -> requestExport(context.getSource(), only, false))
-				.then(ClientCommands.literal("anyway").executes(context -> requestExport(context.getSource(), only, true)))
+				.then(ClientCommands.literal("not-for-webmap").executes(context -> requestExport(context.getSource(), only, true)))
 				.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource(), only)));
 	}
 
-	private int requestExport(FabricClientCommandSource source, String only, boolean anyway) {
+	private int requestExport(FabricClientCommandSource source, String only, boolean withPacks) {
 		if (!xaeroInstalled()) {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
@@ -293,15 +293,17 @@ public class AomcVisitedClient implements ClientModInitializer {
 				.filter(id -> id.startsWith("file/"))
 				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
 		String command = "/visited export" + (only == null ? "" : " " + VisitedChunks.shortName(only));
-		if (!packs.isEmpty() && !anyway) {
+		if (!packs.isEmpty() && !withPacks) {
 			source.sendFeedback(Chat.warning("Resource packs change the colours of the exported map. These are on:")
 					.append(Chat.line(String.join(", ", packs)))
 					.append(Chat.buttons(
 							Chat.button("Turn packs off for the export", ChatFormatting.GREEN, command + " without-packs",
 									"Turns your resource packs off, exports, then turns them back on in the same"
 											+ " order. Minecraft reloads twice."),
-							Chat.button("Export anyway", ChatFormatting.RED, command + " anyway",
-									"Export with the resource packs on: the colours on the webmap will be off"))));
+							Chat.button("Export with packs (not for the webmap)", ChatFormatting.GOLD,
+									command + " not-for-webmap",
+									"Export with your resource packs on, e.g. for yourself: don't upload it to the webmap,"
+											+ " its colours may be off"))));
 			return 0;
 		}
 		exportNextTick = true;
