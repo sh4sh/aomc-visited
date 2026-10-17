@@ -82,6 +82,9 @@ public final class XaeroExport {
 	}
 
 	static Component start(Minecraft client, String only, Runnable whenDone) {
+		if (!AomcVisitedClient.SETTINGS.enabled()) {
+			return Chat.error("AOMC Visited is off. Turn it on with /visited on.");
+		}
 		if (active()) {
 			return Chat.error("An export is already running.");
 		}

@@ -26,7 +26,7 @@ Under `<game dir>/aomc_visited/`:
 - `server/<address>/<namespace>/<dimension>.txt`: a record, one chunk `x,z` per line, `x,z,c` if changed.
 - `server/<address>/exports.txt`: list of exports that haven't been marked as uploaded yet.
 - `server/<address>/forgotten/`: records over 1 hour old, must be manually restored.
-- `settings.properties`: whether the overlay is shown in Xaero.
+- `settings.properties`: whether the mod is on (`/visited on|off`) and whether the overlay is shown in Xaero.
 
 ## Building
 

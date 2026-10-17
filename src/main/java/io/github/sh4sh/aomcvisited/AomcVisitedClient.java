@@ -73,6 +73,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
 										markUploaded(context.getSource(), IntegerArgumentType.getInteger(context, "export")))))
+						.then(ClientCommands.literal("on").executes(context -> setEnabled(context.getSource(), true)))
+						.then(ClientCommands.literal("off").executes(context -> setEnabled(context.getSource(), false)))
 						.then(ClientCommands.literal("show")
 								.executes(context -> setShow(context.getSource(), !SETTINGS.showOnMap()))
 								.then(ClientCommands.literal("on").executes(context -> setShow(context.getSource(), true)))
@@ -148,7 +150,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 	}
 
 	private static void remindOfEarlierGround(Minecraft client) {
-		if (client.player == null) {
+		if (client.player == null || !SETTINGS.enabled()) {
 			return;
 		}
 		String when = ago(System.currentTimeMillis() - VISITED.lastHere());
@@ -248,6 +250,18 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		source.sendFeedback(Chat.success("Marked as uploaded: forgot " + forgotten + " chunks.")
 				.append(Chat.line("Anything that changed since that export is kept for the next one.")));
+		return 1;
+	}
+
+	private static int setEnabled(FabricClientCommandSource source, boolean enabled) {
+		SETTINGS.setEnabled(enabled);
+		if (xaeroInstalled()) {
+			VisitedHighlighter.refreshAll();
+		}
+		source.sendFeedback(Chat.info(enabled
+				? "AOMC Visited is on: recording what Xaero's World Map maps. Turn it off with /visited off."
+				: "AOMC Visited is off: nothing is recorded or shown, and what's already recorded is kept. Turn it"
+						+ " back on with /visited on."));
 		return 1;
 	}
 

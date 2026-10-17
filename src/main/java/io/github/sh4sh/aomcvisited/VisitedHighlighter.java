@@ -81,7 +81,7 @@ public final class VisitedHighlighter extends ChunkHighlighter {
 	}
 
 	private static boolean active() {
-		return !exportScreenOpen && AomcVisitedClient.SETTINGS.showOnMap();
+		return !exportScreenOpen && AomcVisitedClient.SETTINGS.enabled() && AomcVisitedClient.SETTINGS.showOnMap();
 	}
 
 	private static String key(ResourceKey<Level> dimension) {

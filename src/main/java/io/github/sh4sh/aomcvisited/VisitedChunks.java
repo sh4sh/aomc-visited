@@ -79,6 +79,9 @@ public final class VisitedChunks {
 			Set.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end");
 
 	public synchronized boolean mapped(ResourceKey<Level> dimension, int x, int z, boolean differs) {
+		if (!AomcVisitedClient.SETTINGS.enabled()) {
+			return false;
+		}
 		if (server == null) {
 			Minecraft client = Minecraft.getInstance();
 			if (client.getConnection() == null) {
@@ -304,8 +307,9 @@ public final class VisitedChunks {
 			}
 		}
 		dirty.clear();
+		// Stamp even unchanged files, while on: the newest stamp is when the player was last here.
 		FileTime now = FileTime.fromMillis(System.currentTimeMillis());
-		for (String key : records.keySet()) {
+		for (String key : AomcVisitedClient.SETTINGS.enabled() ? records.keySet() : Set.<String>of()) {
 			Path file = fileFor(key);
 			try {
 				if (Files.exists(file)) {
