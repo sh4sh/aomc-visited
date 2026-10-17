@@ -49,6 +49,6 @@ Under `<game dir>/aomc_visited/`:
   Merge once the Build check passes.
 - CI (`.github/workflows/build.yml`) builds every pull request and every push to `main`, and attaches the
   jar to the run as an artifact.
-- To release, bump `version` in `gradle.properties`, merge, then tag that commit on `main` and push the
-  tag (`git tag v<version>`, `git push origin v<version>`). CI checks the tag matches `version`, builds,
-  and publishes a GitHub release with the jar.
+- Releases are automatic: when a push to `main` builds a `version` that has no release yet, CI tags the
+  commit `v<version>` and publishes a GitHub release with the jar. So bumping `version` and merging it
+  releases it.
