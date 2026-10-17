@@ -2,14 +2,15 @@
 
 - **Recording** (`XaeroMapWriterMixin`, `VisitedChunks`): records chunks that Xaero's World Map writes on its 
   map, per server and dimension (only dimensions named overworld, Nether and End are supported), marked "changed"
-  if its map data was updated. Saved once per minute and on game exit.
+  if its map data was updated. Saved once per minute and when leaving the server.
 - **Exporting** (`/visited export [overworld|the_nether|the_end] [anyway|without-packs]`, `XaeroExport`):
   runs Xaero's export for each dimension with records, in a few compact areas (`ExportAreas`). Trims the export by
   blacking out chunks not in records (`TileMasker`), and gathers the images in one folder. Refuses while in
   cave mode. Offers to turn resource packs off for the export, since they may change Xaero's colours.
 - **Mark as uploaded** (`/visited uploaded <n>`, a button on the export message): forgets the chunks that
   export contained, except ones Xaero has changed since. Works after a restart (`exports.txt`).
-  Same thing as `/visited clear`.
+  Similar to `/visited clear`, which removes all old exports/records (not just the marked upload) in a given
+  dimension.
 - **Forgetting old areas**: if the player was offline for more than an hour (`FORGET_AFTER_MS`), the record is
   forgotten on next login, but can still be restored with [Restore] for a day. Otherwise, a reminder offers
   [Export it now] and [Start over] (`/visited clear all`). Restores are meant to have more friction, to
@@ -23,7 +24,7 @@
 Under `<game dir>/aomc_visited/`:
 
 - `server/<address>/<namespace>/<dimension>.txt`: a record, one chunk `x,z` per line, `x,z,c` if changed.
-- `server/<address>/exports.txt`: exports records that aren't marked as uploaded.
+- `server/<address>/exports.txt`: list of exports that haven't been marked as uploaded yet.
 - `server/<address>/forgotten/`: records over 1 hour old, must be manually restored.
 - `settings.properties`: whether the overlay is shown in Xaero.
 
