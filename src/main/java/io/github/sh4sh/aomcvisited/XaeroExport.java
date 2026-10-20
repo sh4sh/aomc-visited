@@ -185,10 +185,10 @@ public final class XaeroExport {
 					MapWorld world = processor.getMapWorld();
 					if (!processor.isWaitingForWorldUpdate() && processor.isMapWorldUsable() && world != null
 							&& target.equals(world.getCurrentDimensionId())) {
-						log("{}: Xaero's map ready after {} ms", VisitedChunks.shortName(keys.get(dimension)), inStage());
+						log("{}: Xaero's map switched after {} ms", VisitedChunks.shortName(keys.get(dimension)), inStage());
 						stage(Stage.SETTLING);
 					} else if (inStage() > SWITCH_TIMEOUT_MS) {
-						log("{}: Xaero's map not ready after {} ms, skipping", VisitedChunks.shortName(keys.get(dimension)),
+						log("{}: Xaero's map didn't switch after {} ms, skipping", VisitedChunks.shortName(keys.get(dimension)),
 								inStage());
 						line(red(VisitedChunks.shortName(keys.get(dimension)) + ": Xaero didn't switch its map to it in time,"
 								+ " so it was skipped. Try again."));
