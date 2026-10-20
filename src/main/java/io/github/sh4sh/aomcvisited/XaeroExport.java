@@ -49,6 +49,7 @@ public final class XaeroExport {
 	private static final long SWITCH_TIMEOUT_MS = 30_000;
 	private static final long SETTLE_MS = 1000;
 	private static final int NOT_PREPARED_RETRIES = 20;
+	private static final int LARGE_EXPORT_TILES = 25;
 
 	private static volatile Job job;
 	private static volatile long lastProgress;
@@ -105,11 +106,15 @@ public final class XaeroExport {
 					+ " Xaero's World Map may not be supported.");
 		}
 		List<String> names = keys.stream().map(VisitedChunks::shortName).toList();
+		int tiles = keys.stream().flatMap(key -> plan(key).stream()).mapToInt(ExportAreas.Box::tiles).sum();
 		ResourceKey<Level> showing = processor.getMapWorld().getCurrentDimensionId();
 		boolean switches = keys.size() > 1 || showing == null || !keys.getFirst().equals(showing.identifier().toString());
 		Chat.send(client, Chat.info("Exporting " + String.join(", ", names) + ". Progress shows above your hotbar."
 				+ (switches ? " Xaero's map switches dimension while it works, and the" : " The")
-				+ " game may freeze for a few seconds."));
+				+ (tiles > LARGE_EXPORT_TILES
+						? " game may freeze for a while: this is a large export, up to " + tiles + " images."
+						: " game may freeze for a few seconds.")));
+		log("{}, up to {} images", String.join(", ", names), tiles);
 		job = new Job(client, processor, keys, whenDone);
 		lastProgress = System.currentTimeMillis();
 		job.startDimension();
@@ -126,6 +131,7 @@ public final class XaeroExport {
 		private final ResourceKey<Level> previousCustom;
 		private final long writesAtStart = AomcVisitedClient.VISITED.writes();
 		private final MutableComponent report = Component.empty();
+		private final long started = System.currentTimeMillis();
 		private final List<Component> buttons = new ArrayList<>();
 		private int ticks;
 		private int dimension;
@@ -179,8 +185,11 @@ public final class XaeroExport {
 					MapWorld world = processor.getMapWorld();
 					if (!processor.isWaitingForWorldUpdate() && processor.isMapWorldUsable() && world != null
 							&& target.equals(world.getCurrentDimensionId())) {
+						log("{}: Xaero's map ready after {} ms", VisitedChunks.shortName(keys.get(dimension)), inStage());
 						stage(Stage.SETTLING);
 					} else if (inStage() > SWITCH_TIMEOUT_MS) {
+						log("{}: Xaero's map not ready after {} ms, skipping", VisitedChunks.shortName(keys.get(dimension)),
+								inStage());
 						line(red(VisitedChunks.shortName(keys.get(dimension)) + ": Xaero didn't switch its map to it in time,"
 								+ " so it was skipped. Try again."));
 						nextDimension();
@@ -226,13 +235,9 @@ public final class XaeroExport {
 				return;
 			}
 			String key = keys.get(dimension);
-			LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
-			List<int[]> list = new ArrayList<>(chunks.size());
-			for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
-				long pos = it.nextLong();
-				list.add(new int[] {ChunkPos.getX(pos), ChunkPos.getZ(pos)});
-			}
-			run = new Run(this, key, ExportAreas.plan(list));
+			run = new Run(this, key, plan(key));
+			log("{}: {} area(s), up to {} images", VisitedChunks.shortName(key), run.areas.size(),
+					run.areas.stream().mapToInt(ExportAreas.Box::tiles).sum());
 			showProgress();
 			run.exportArea();
 		}
@@ -242,6 +247,7 @@ public final class XaeroExport {
 		}
 
 		private void finish() {
+			log("finished in {} ms", System.currentTimeMillis() - started);
 			MapWorld world = processor.getMapWorld();
 			if (world != null) {
 				world.setCustomDimensionId(previousCustom);
@@ -280,6 +286,7 @@ public final class XaeroExport {
 		private Path folder;
 		private TileMasker.Result total = new TileMasker.Result(0, 0, 0, 0);
 		private ExportScreen doneScreen;
+		private long areaStarted;
 		private Component doneProblem;
 
 		Run(Job job, String key, List<ExportAreas.Box> areas) {
@@ -305,6 +312,9 @@ public final class XaeroExport {
 				}
 			};
 			taskEnded = false;
+			areaStarted = System.currentTimeMillis();
+			log("{}: area {} of {} ({} x {} chunks) handed to Xaero", VisitedChunks.shortName(key), index + 1, areas.size(),
+					area.maxX() - area.minX() + 1, area.maxZ() - area.minZ() + 1);
 			if (!job.processor.getMapSaveLoad().exportPNG(screen, selection)) {
 				fail(red("Xaero's World Map is already exporting."));
 				return;
@@ -318,8 +328,12 @@ public final class XaeroExport {
 		private void done(ExportScreen screen, ExportAreas.Box area, PNGExportResult result) {
 			doneScreen = screen;
 			PNGExportResultType type = result.getType();
+			log("{}: Xaero answered {} after {} ms", VisitedChunks.shortName(key), type,
+					System.currentTimeMillis() - areaStarted);
 			if (type == PNGExportResultType.NOT_PREPARED && retries < NOT_PREPARED_RETRIES) {
 				retries++;
+				log("{}: Xaero's map not prepared yet, retry {} of {}", VisitedChunks.shortName(key), retries,
+						NOT_PREPARED_RETRIES);
 				doneProblem = null;
 				job.stage(Job.Stage.RETRY);
 				closeScreenLater();
@@ -328,7 +342,9 @@ public final class XaeroExport {
 			if (type == PNGExportResultType.EMPTY) {
 				doneProblem = null;
 			} else if (type.isSuccess() && result.getFolderToOpen() != null) {
+				long cleaning = System.currentTimeMillis();
 				doneProblem = clean(result.getFolderToOpen(), area);
+				log("{}: cleaned in {} ms", VisitedChunks.shortName(key), System.currentTimeMillis() - cleaning);
 			} else {
 				doneProblem = red("Xaero couldn't export area " + (index + 1) + " of " + areas.size() + ": ")
 						.append(result.getMessage());
@@ -469,6 +485,20 @@ public final class XaeroExport {
 			job.line(text.withStyle(ChatFormatting.RED));
 			job.nextDimension();
 		}
+	}
+
+	private static void log(String message, Object... args) {
+		AomcVisitedClient.LOGGER.info("[AOMC Visited] export: " + message, args);
+	}
+
+	private static List<ExportAreas.Box> plan(String key) {
+		LongOpenHashSet chunks = AomcVisitedClient.VISITED.snapshot(key);
+		List<int[]> list = new ArrayList<>(chunks.size());
+		for (LongIterator it = chunks.iterator(); it.hasNext(); ) {
+			long pos = it.nextLong();
+			list.add(new int[] {ChunkPos.getX(pos), ChunkPos.getZ(pos)});
+		}
+		return ExportAreas.plan(list);
 	}
 
 	private static void deleteIfEmpty(Path folder) {

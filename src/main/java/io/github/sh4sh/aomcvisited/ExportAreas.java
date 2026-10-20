@@ -15,6 +15,11 @@ public final class ExportAreas {
 			return minX <= other.maxX && other.minX <= maxX && minZ <= other.maxZ && other.minZ <= maxZ;
 		}
 
+		/** How many 1024-block images Xaero splits this area into, at most. */
+		int tiles() {
+			return Math.ceilDiv((maxX - minX + 1) * 16, 1024) * Math.ceilDiv((maxZ - minZ + 1) * 16, 1024);
+		}
+
 		Box union(Box other) {
 			return new Box(Math.min(minX, other.minX), Math.min(minZ, other.minZ),
 					Math.max(maxX, other.maxX), Math.max(maxZ, other.maxZ));
