@@ -299,7 +299,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 		repository.setSelected(original.stream().filter(id -> !id.startsWith("file/")).toList());
 		source.sendFeedback(Chat.info("Turning your resource packs off for the export. They'll come back on"
 				+ " afterwards, in the same order."));
+		long reloading = System.currentTimeMillis();
 		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
+			LOGGER.info("[AOMC Visited] export: packs off, reload took {} ms", System.currentTimeMillis() - reloading);
 			Component error = XaeroExport.start(client, only, () -> restorePacks(client, original));
 			if (error != null) {
 				if (client.player != null) {
@@ -314,7 +316,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 	private static void restorePacks(Minecraft client, List<String> original) {
 		PackRepository repository = client.getResourcePackRepository();
 		repository.setSelected(original);
+		long reloading = System.currentTimeMillis();
 		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
+			LOGGER.info("[AOMC Visited] export: packs back on, reload took {} ms", System.currentTimeMillis() - reloading);
 			boolean sameOrder = List.copyOf(repository.getSelectedIds()).equals(original);
 			if (!sameOrder) {
 				LOGGER.warn("Resource packs restored in a different order: {} instead of {}",
