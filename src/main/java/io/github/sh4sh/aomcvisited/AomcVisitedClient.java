@@ -37,6 +37,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 	/** The export starts a tick after the command, once the chat screen has closed. */
 	private boolean exportNextTick;
 	private String exportOnly;
+	private boolean exportWithPacks;
+	private boolean exportForUpload;
 	private int reminderTicks;
 
 	private static final int REMINDER_DELAY_TICKS = 5 * 20;
@@ -68,7 +70,16 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.then(ClientCommands.literal("all")
 										.executes(context -> clearAll(context.getSource(), false))
 										.then(ClientCommands.literal("confirm").executes(context -> clearAll(context.getSource(), true)))))
-						.then(ClientCommands.literal("uploaded")
+						.then(uploadCommand(ClientCommands.literal("upload"), null)
+								.then(uploadCommand(ClientCommands.literal("overworld"), "minecraft:overworld"))
+								.then(uploadCommand(ClientCommands.literal("the_nether"), "minecraft:the_nether"))
+								.then(uploadCommand(ClientCommands.literal("the_end"), "minecraft:the_end"))
+								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1))
+										.executes(context -> uploadExport(context.getSource(),
+												IntegerArgumentType.getInteger(context, "export"), false))
+										.then(ClientCommands.literal("confirm").executes(context -> uploadExport(
+												context.getSource(), IntegerArgumentType.getInteger(context, "export"), true)))))
+						.then(ClientCommands.literal("mark-uploaded")
 								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
 										markUploaded(context.getSource(), IntegerArgumentType.getInteger(context, "export")))))
@@ -94,7 +105,8 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		if (exportNextTick) {
 			exportNextTick = false;
-			Component error = XaeroExport.start(client, exportOnly, null);
+			Component error = XaeroExport.start(client, exportOnly, exportForUpload ? XaeroExport.Mode.UPLOAD
+					: exportWithPacks ? XaeroExport.Mode.NOT_FOR_WEBMAP : XaeroExport.Mode.EXPORT, null);
 			if (error != null && client.player != null) {
 				client.player.sendSystemMessage(error);
 			}
@@ -252,7 +264,81 @@ public class AomcVisitedClient implements ClientModInitializer {
 			S command, String only) {
 		return command.executes(context -> requestExport(context.getSource(), only, false))
 				.then(ClientCommands.literal("not-for-webmap").executes(context -> requestExport(context.getSource(), only, true)))
-				.then(ClientCommands.literal("without-packs").executes(context -> exportWithoutPacks(context.getSource(), only)));
+				.then(ClientCommands.literal("without-packs")
+						.executes(context -> exportWithoutPacks(context.getSource(), only, false)));
+	}
+
+	private <S extends com.mojang.brigadier.builder.ArgumentBuilder<FabricClientCommandSource, S>> S uploadCommand(
+			S command, String only) {
+		return command.executes(context -> requestUpload(context.getSource(), only, false))
+				.then(ClientCommands.literal("confirm").executes(context -> requestUpload(context.getSource(), only, true)))
+				.then(ClientCommands.literal("without-packs")
+						.executes(context -> exportWithoutPacks(context.getSource(), only, true)));
+	}
+
+	/** {@code /visited upload [<dimension>]}: exports, then uploads to the webmap and marks as uploaded. */
+	private int requestUpload(FabricClientCommandSource source, String only, boolean confirmed) {
+		if (!xaeroInstalled()) {
+			source.sendFeedback(Chat.error("Uploading needs Xaero's World Map."));
+			return 0;
+		}
+		if (WebmapUpload.running()) {
+			source.sendFeedback(Chat.error("An upload is already running."));
+			return 0;
+		}
+		List<String> packs = playerPacks(source.getClient());
+		String command = "/visited upload" + (only == null ? "" : " " + VisitedChunks.shortName(only));
+		String what = only == null ? "everything recorded" : VisitedChunks.shortName(only);
+		if (!packs.isEmpty()) {
+			source.sendFeedback(Chat.warning("Resource packs change the colours of the map, so they have to be off for"
+					+ " an upload. These are on:")
+					.append(Chat.line(String.join(", ", packs)))
+					.append(Chat.buttons(Chat.button("Turn packs off and upload", ChatFormatting.GREEN,
+							command + " without-packs", "Turns your resource packs off, exports " + what + ", turns them"
+									+ " back on, then uploads to map.diorite.xyz and marks it as uploaded"))));
+			return 0;
+		}
+		if (!confirmed) {
+			source.sendFeedback(Chat.info("Export and upload " + what + " to map.diorite.xyz? It's marked as"
+					+ " uploaded once the webmap has processed it.")
+					.append(Chat.buttons(Chat.button("Confirm", ChatFormatting.GREEN, command + " confirm",
+							"Export and upload " + what))));
+			return 1;
+		}
+		exportNextTick = true;
+		exportOnly = only;
+		exportWithPacks = false;
+		exportForUpload = true;
+		return 1;
+	}
+
+	/** {@code /visited upload <export>}: the [Upload] button on an export made this session. */
+	private static int uploadExport(FabricClientCommandSource source, int number, boolean confirmed) {
+		WebmapUpload.Dimension export = WebmapUpload.export(number);
+		if (export == null) {
+			source.sendFeedback(Chat.error("That export's images aren't known any more: it's from an earlier session,"
+					+ " or a newer export replaced it. Use /visited upload to export and upload again."));
+			return 0;
+		}
+		if (WebmapUpload.running()) {
+			source.sendFeedback(Chat.error("An upload is already running."));
+			return 0;
+		}
+		String what = export.images().size() + " images of " + VisitedChunks.shortName(export.key());
+		if (!confirmed) {
+			source.sendFeedback(Chat.info("Upload " + what + " to map.diorite.xyz? They're marked as uploaded once"
+					+ " the webmap has processed them.")
+					.append(Chat.buttons(Chat.button("Confirm", ChatFormatting.GREEN, "/visited upload " + number
+							+ " confirm", "Upload " + what))));
+			return 1;
+		}
+		if (!export.images().stream().allMatch(java.nio.file.Files::isRegularFile)) {
+			source.sendFeedback(Chat.error("Some of that export's images were moved or deleted. Use /visited upload"
+					+ " to export and upload again."));
+			return 0;
+		}
+		WebmapUpload.start(source.getClient(), List.of(export));
+		return 1;
 	}
 
 	private int requestExport(FabricClientCommandSource source, String only, boolean withPacks) {
@@ -260,10 +346,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
 		}
-		// The player's own packs are "file/<name>"; their names can contain colour codes.
-		List<String> packs = source.getClient().getResourcePackRepository().getSelectedIds().stream()
-				.filter(id -> id.startsWith("file/"))
-				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
+		List<String> packs = playerPacks(source.getClient());
 		String command = "/visited export" + (only == null ? "" : " " + VisitedChunks.shortName(only));
 		if (!packs.isEmpty() && !withPacks) {
 			source.sendFeedback(Chat.warning("Resource packs change the colours of the exported map. These are on:")
@@ -280,10 +363,19 @@ public class AomcVisitedClient implements ClientModInitializer {
 		}
 		exportNextTick = true;
 		exportOnly = only;
+		exportWithPacks = withPacks;
+		exportForUpload = false;
 		return 1;
 	}
 
-	private static int exportWithoutPacks(FabricClientCommandSource source, String only) {
+	private static List<String> playerPacks(Minecraft client) {
+		// The player's own packs are "file/<name>"; their names can contain colour codes.
+		return client.getResourcePackRepository().getSelectedIds().stream()
+				.filter(id -> id.startsWith("file/"))
+				.map(id -> ChatFormatting.stripFormatting(id.substring("file/".length()))).toList();
+	}
+
+	private static int exportWithoutPacks(FabricClientCommandSource source, String only, boolean upload) {
 		if (!xaeroInstalled()) {
 			source.sendFeedback(Chat.error("Exporting needs Xaero's World Map."));
 			return 0;
@@ -292,17 +384,24 @@ public class AomcVisitedClient implements ClientModInitializer {
 			source.sendFeedback(Chat.error("An export is already running."));
 			return 0;
 		}
+		if (upload && WebmapUpload.running()) {
+			source.sendFeedback(Chat.error("An upload is already running."));
+			return 0;
+		}
 		Minecraft client = source.getClient();
 		PackRepository repository = client.getResourcePackRepository();
 		// In order: the list's order is the packs' priority, and Minecraft keeps the order it's given.
 		List<String> original = List.copyOf(repository.getSelectedIds());
 		repository.setSelected(original.stream().filter(id -> !id.startsWith("file/")).toList());
 		source.sendFeedback(Chat.info("Turning your resource packs off for the export. They'll come back on"
-				+ " afterwards, in the same order."));
+				+ " afterwards, in the same order.")
+				.append(Chat.line("Right after turning packs off, Xaero can take up to a minute to export, and the"
+						+ " game may freeze meanwhile.")));
 		long reloading = System.currentTimeMillis();
 		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
 			LOGGER.info("[AOMC Visited] export: packs off, reload took {} ms", System.currentTimeMillis() - reloading);
-			Component error = XaeroExport.start(client, only, () -> restorePacks(client, original));
+			Component error = XaeroExport.start(client, only, upload ? XaeroExport.Mode.UPLOAD : XaeroExport.Mode.EXPORT,
+					() -> restorePacks(client, original));
 			if (error != null) {
 				if (client.player != null) {
 					client.player.sendSystemMessage(error);

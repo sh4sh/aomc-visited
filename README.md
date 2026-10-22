@@ -9,11 +9,13 @@ Requires Xaero World Map. Built and tested on Xaero World Map v1.47.1, but it ma
 
 1. Open the world map to see areas the mod has recorded: green outline around areas the export will include,
    green fill on areas that are new or changed.
-2. When you're done, type **`/visited export`**. It exports every dimension you've been in (the game may
-   freeze for a few seconds) and opens the exports folder.
-3. Upload each dimension's images to its corresponding map on the webmap.
-4. Click **[Mark as uploaded]** in chat, so your next export only contains new areas. This works
-   after restarting the game too.
+2. When you're done, type **`/visited upload`**. It exports every dimension you've been in (the game may
+   freeze for a few seconds), uploads the images to the webmap, and **marks them as uploaded** once the
+   webmap has processed them, so your next upload only contains new areas.
+
+To check the images before uploading, use **`/visited export`** instead: it opens the exports folder, and
+the chat message has an **[Upload]** button per dimension. You can also upload the images yourself on the
+webmap, then click **[Mark as uploaded]**.
 
 Turn Xaero's cave mode off before exporting. If you have a resource pack on, the mod offers to turn it off
 for the export and back on afterwards, since they can change the map's colours.
@@ -27,8 +29,9 @@ can choose to continue with the last session or clear the data to start a new se
 | Command | What it does |
 |---|---|
 | `/visited` | How many chunks are recorded in each dimension |
+| `/visited upload [overworld\|the_nether\|the_end]` | Export, upload to the webmap, and mark as uploaded (asks to confirm) |
 | `/visited export [overworld\|the_nether\|the_end]` | Export what you've mapped, cleaned and ready to upload |
-| `/visited uploaded` | Mark the latest export as uploaded (same as the button) |
+| `/visited mark-uploaded` | Mark the latest export as uploaded (same as the button) |
 | `/visited on\|off` | Turn the mod on or off: when off, nothing is recorded or shown |
 | `/visited overlay on\|off` | Show or hide the green overlay on Xaero's map |
 | `/visited clear` | Forget what's recorded in your current dimension (asks to confirm) |
