@@ -68,7 +68,7 @@ public class AomcVisitedClient implements ClientModInitializer {
 								.then(ClientCommands.literal("all")
 										.executes(context -> clearAll(context.getSource(), false))
 										.then(ClientCommands.literal("confirm").executes(context -> clearAll(context.getSource(), true)))))
-						.then(ClientCommands.literal("uploaded")
+						.then(ClientCommands.literal("mark-uploaded")
 								.executes(context -> markUploaded(context.getSource(), VISITED.latestExport()))
 								.then(ClientCommands.argument("export", IntegerArgumentType.integer(1)).executes(context ->
 										markUploaded(context.getSource(), IntegerArgumentType.getInteger(context, "export")))))

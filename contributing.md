@@ -7,7 +7,7 @@
   runs Xaero's export for each dimension with records, in a few compact areas (`ExportAreas`). Trims the export by
   blacking out chunks not in records (`TileMasker`), and gathers the images in one folder. Refuses while in
   cave mode. Offers to turn resource packs off for the export, since they may change Xaero's colours.
-- **Mark as uploaded** (`/visited uploaded <n>`, a button on the export message): forgets the chunks that
+- **Mark as uploaded** (`/visited mark-uploaded <n>`, a button on the export message): forgets the chunks that
   export contained, except ones Xaero has changed since. Works after a restart (`exports.txt`).
   Similar to `/visited clear`, which removes all old exports/records (not just the marked upload) in a given
   dimension.

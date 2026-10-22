@@ -28,7 +28,7 @@ can choose to continue with the last session or clear the data to start a new se
 |---|---|
 | `/visited` | How many chunks are recorded in each dimension |
 | `/visited export [overworld\|the_nether\|the_end]` | Export what you've mapped, cleaned and ready to upload |
-| `/visited uploaded` | Mark the latest export as uploaded (same as the button) |
+| `/visited mark-uploaded` | Mark the latest export as uploaded (same as the button) |
 | `/visited on\|off` | Turn the mod on or off: when off, nothing is recorded or shown |
 | `/visited overlay on\|off` | Show or hide the green overlay on Xaero's map |
 | `/visited clear` | Forget what's recorded in your current dimension (asks to confirm) |
