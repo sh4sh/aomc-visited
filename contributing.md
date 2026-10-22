@@ -7,6 +7,13 @@
   runs Xaero's export for each dimension with records, in a few compact areas (`ExportAreas`). Trims the export by
   blacking out chunks not in records (`TileMasker`), and gathers the images in one folder. Refuses while in
   cave mode. Offers to turn resource packs off for the export, since they may change Xaero's colours.
+- **Uploading** (`/visited upload [dimension]`, or `/visited upload <n>` from an export's [Upload] button,
+  `WebmapUpload`): uploads each image, one after another, to `https://map.diorite.xyz/api/map/upload/<dim>`
+  (the webmap calls the Nether `nether`), then runs `/api/map/process` and reads its streamed progress. Only
+  if every image was accepted and processing finished without an error naming one of them is the export
+  marked as uploaded. Nothing is sent unless the player asks. Exports made with resource packs on
+  (`not-for-webmap`) are never offered for upload. A unique prefix on uploaded filenames could tell our
+  images apart in the shared processing log, if errors ever get mixed up.
 - **Mark as uploaded** (`/visited mark-uploaded <n>`, a button on the export message): forgets the chunks that
   export contained, except ones Xaero has changed since. Works after a restart (`exports.txt`).
   Similar to `/visited clear`, which removes all old exports/records (not just the marked upload) in a given

@@ -82,7 +82,10 @@ public final class XaeroExport {
 		}
 	}
 
-	static Component start(Minecraft client, String only, Runnable whenDone) {
+	/** {@code NOT_FOR_WEBMAP} exports have resource packs on, so they're never offered for upload. */
+	enum Mode { EXPORT, NOT_FOR_WEBMAP, UPLOAD }
+
+	static Component start(Minecraft client, String only, Mode mode, Runnable whenDone) {
 		if (!AomcVisitedClient.SETTINGS.enabled()) {
 			return Chat.error("AOMC Visited is off. Turn it on with /visited on.");
 		}
@@ -115,7 +118,7 @@ public final class XaeroExport {
 						? " game may freeze for a while: this is a large export, up to " + tiles + " images."
 						: " game may freeze for a few seconds.")));
 		log("{}, up to {} images", String.join(", ", names), tiles);
-		job = new Job(client, processor, keys, whenDone);
+		job = new Job(client, processor, keys, mode, whenDone);
 		lastProgress = System.currentTimeMillis();
 		job.startDimension();
 		return null;
@@ -127,12 +130,15 @@ public final class XaeroExport {
 		private final Minecraft client;
 		private final MapProcessor processor;
 		private final List<String> keys;
+		private final Mode mode;
 		private final Runnable whenDone;
 		private final ResourceKey<Level> previousCustom;
 		private final long writesAtStart = AomcVisitedClient.VISITED.writes();
 		private final MutableComponent report = Component.empty();
 		private final long started = System.currentTimeMillis();
 		private final List<Component> buttons = new ArrayList<>();
+		private final List<Component> markButtons = new ArrayList<>();
+		private final List<WebmapUpload.Dimension> uploads = new ArrayList<>();
 		private int ticks;
 		private int dimension;
 		private Path root;
@@ -142,10 +148,11 @@ public final class XaeroExport {
 		private ResourceKey<Level> target;
 		private Run run;
 
-		Job(Minecraft client, MapProcessor processor, List<String> keys, Runnable whenDone) {
+		Job(Minecraft client, MapProcessor processor, List<String> keys, Mode mode, Runnable whenDone) {
 			this.client = client;
 			this.processor = processor;
 			this.keys = keys;
+			this.mode = mode;
 			this.whenDone = whenDone;
 			this.previousCustom = processor.getMapWorld().getCustomDimensionId();
 		}
@@ -256,13 +263,23 @@ public final class XaeroExport {
 			job = null;
 			AomcVisitedClient.VISITED.save();
 			MutableComponent message;
-			if (anyImages) {
+			if (anyImages && mode == Mode.UPLOAD) {
+				message = Chat.info("Export cleaned: map exports/" + root.getFileName() + ". Uploading it to"
+						+ " map.diorite.xyz now. It's marked as uploaded once the webmap has processed it.");
+				message.append(report).append(Chat.buttons(Chat.openButton("Open folder", root)));
+				if (!uploads.isEmpty()) {
+					WebmapUpload.start(client, List.copyOf(uploads));
+				}
+			} else if (anyImages) {
 				Blaze3D.openPath(root);
 				message = Chat.success("Export cleaned and ready to upload: map exports/" + root.getFileName()
 						+ (keys.size() == 1 ? ". Upload it to the " + VisitedChunks.shortName(keys.getFirst()) + " map."
 								: ". Upload each dimension's folder to its own map."));
 				buttons.addFirst(Chat.openButton("Open folder", root));
 				message.append(report).append(Chat.buttons(buttons.toArray(Component[]::new)));
+				if (!markButtons.isEmpty()) {
+					message.append(Chat.buttons(markButtons.toArray(Component[]::new)));
+				}
 				Chat.status(client, "export done, see chat.", ChatFormatting.GREEN);
 			} else {
 				deleteIfEmpty(root);
@@ -458,10 +475,28 @@ public final class XaeroExport {
 				}
 			}
 			int number = AomcVisitedClient.VISITED.rememberExport(key, exported, job.writesAtStart);
-			job.buttons.add(Chat.button("Mark " + VisitedChunks.shortName(key) + " as uploaded", ChatFormatting.GREEN,
-					"/visited mark-uploaded " + number, "Click once " + where() + " has been uploaded: forgets"
-							+ " what it contained, so the next export only has areas mapped since. Works after a"
-							+ " restart too."));
+			List<Path> images;
+			try (Stream<Path> files = Files.list(folder)) {
+				images = files.filter(p -> p.toString().endsWith(".png")).sorted().toList();
+			} catch (IOException e) {
+				AomcVisitedClient.LOGGER.error("Could not list {}", folder, e);
+				images = List.of();
+			}
+			WebmapUpload.Dimension upload = new WebmapUpload.Dimension(key, number, images);
+			if (job.mode == Mode.UPLOAD) {
+				job.uploads.add(upload);
+			} else {
+				if (job.mode == Mode.EXPORT) {
+					WebmapUpload.remember(upload);
+					job.buttons.add(Chat.button("Upload " + VisitedChunks.shortName(key), ChatFormatting.GREEN,
+							"/visited upload " + number, "Uploads " + where() + " to map.diorite.xyz, then marks it as"
+									+ " uploaded (asks to confirm first)"));
+				}
+				job.markButtons.add(Chat.button("Mark " + VisitedChunks.shortName(key) + " as uploaded",
+						ChatFormatting.DARK_GREEN, "/visited mark-uploaded " + number, "Click once " + where()
+								+ " has been uploaded by hand: forgets what it contained, so the next export only has"
+								+ " areas mapped since. Works after a restart too."));
+			}
 			String name = VisitedChunks.shortName(key) + (job.keys.size() == 1 ? "" : "/");
 			job.line(Component.literal(name + ": " + total.chunksKept() + " chunks (" + changed + " new or changed), "
 					+ left + (left == 1 ? " image" : " images")
