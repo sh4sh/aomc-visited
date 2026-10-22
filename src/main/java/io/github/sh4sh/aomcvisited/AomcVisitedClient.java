@@ -394,7 +394,9 @@ public class AomcVisitedClient implements ClientModInitializer {
 		List<String> original = List.copyOf(repository.getSelectedIds());
 		repository.setSelected(original.stream().filter(id -> !id.startsWith("file/")).toList());
 		source.sendFeedback(Chat.info("Turning your resource packs off for the export. They'll come back on"
-				+ " afterwards, in the same order."));
+				+ " afterwards, in the same order.")
+				.append(Chat.line("Right after turning packs off, Xaero can take up to a minute to export, and the"
+						+ " game may freeze meanwhile.")));
 		long reloading = System.currentTimeMillis();
 		client.reloadResourcePacks().thenRun(() -> client.execute(() -> {
 			LOGGER.info("[AOMC Visited] export: packs off, reload took {} ms", System.currentTimeMillis() - reloading);
